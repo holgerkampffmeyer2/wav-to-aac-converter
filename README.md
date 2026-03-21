@@ -1,5 +1,7 @@
 # optimize-music-prompts
 
+![AI-Powered Audio Conversion](ai-powered.png)
+
 Automated WAV to AAC conversion with loudness normalization, metadata extraction, and cover art embedding.
 
 ## What This Does
