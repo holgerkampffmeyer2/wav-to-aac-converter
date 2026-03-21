@@ -2,17 +2,73 @@
 
 Automated workflow for converting WAV files to high-quality AAC with loudness normalization and metadata.
 
-## Workflow
+## Workflow Types
 
+### Single File (Sequential)
 ```
 Loudness Analysis → Metadata Extraction → [Web Search if needed] → AAC Encoding → Embed Artwork → Verify
 ```
 
+### Batch Processing (Parallel with Subagents)
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    MAIN AGENT (Orchestrator)                 │
+│  1. Scan WAV files                                          │
+│  2. Launch N subagents in parallel (1 per file)             │
+│  3. Collect results, verify outputs                          │
+└─────────────────────────────────────────────────────────────┘
+                              │
+          ┌───────────────────┼───────────────────┐
+          ▼                   ▼                   ▼
+   ┌─────────────┐      ┌─────────────┐     ┌─────────────┐
+   │ SUBAGENT 1  │      │ SUBAGENT 2  │     │ SUBAGENT N  │
+   │ File A      │      │ File B      │     │ File N      │
+   └─────────────┘      └─────────────┘     └─────────────┘
+```
+
+**Benefits**: Process N files in parallel instead of sequentially. 10 files take ~1x time instead of 10x.
+
+## Batch Execution with Subagents
+
+### Main Agent (Orchestrator)
+
+```bash
+# 1. List all WAV files
+ls *.wav
+
+# 2. Launch subagent for each file
+# Use task tool with 'general' subagent_type
+```
+
+### Subagent Prompt Template
+
+```
+Convert "{filename}" to AAC:
+1. Loudness analysis: ffmpeg -i "{filename}" -af loudnorm=print_format=json -f null - 2>&1 | grep -A 20 '^\{$'
+2. Extract metadata: ffprobe -v quiet -print_format json -show_format -show_streams "{filename}"
+3. Search Deezer API for cover art: curl -sL "https://api.deezer.com/search/album?q={query}"
+4. Encode with metadata and embed cover
+5. Verify output with ffprobe
+6. Return result: SUCCESS/FAILED + output filename
+```
+
+### Parallelization Strategy
+
+| Files | Sequential | Parallel (N subagents) | Speedup |
+|-------|------------|-------------------------|---------|
+| 1     | 1x         | 1x                      | 1x      |
+| 5     | 5x         | ~1x                     | 5x      |
+| 10    | 10x        | ~1x                     | 10x     |
+| 20    | 20x        | ~1-2x                   | 10-20x  |
+
+**Recommended**: Use 5-10 subagents maximum to avoid rate limiting on metadata APIs.
+
 ## Prerequisites
 
+- `python3` for running convert.py
 - `ffmpeg` with AAC encoding support
 - `ffprobe` for metadata extraction
-- Internet access for metadata lookup (optional)
+- Internet access for metadata lookup
 
 ---
 
@@ -34,10 +90,10 @@ ffmpeg -i "input.wav" -af loudnorm=print_format=json -f null - 2>&1 | grep -A 20
 Calculate gain reduction if `input_tp > -0.1`:
 
 ```
-gain_db = input_tp - (-0.1)
+gain_db = min(0, -0.1 - input_tp)
 ```
 
-Example: `input_tp = 1.50` → `gain_db = -2.0`
+Example: `input_tp = 1.50` → `gain_db = -1.60`
 
 **Error handling**: If analysis fails, check if ffmpeg supports loudnorm filter (`ffmpeg -filters | grep loudnorm`).
 
@@ -53,17 +109,19 @@ Extract and store:
 - Title, artist, album, genre, date, track number
 - Embedded artwork (if present)
 
-### Extract Cover Art
+### Extract Cover Art from Source
 
 ```bash
-ffmpeg -y -i "input.wav" -vf "scale=600:600:force_original_aspect_ratio=decrease,pad=600:600:(ow-iw)/2:(oh-ih)/2" -frames:v 1 -q:v 2 "cover.jpg" 2>/dev/null
+ffmpeg -y -i "input.wav" -map 0:v -map -0:a -c:v copy "cover.jpg" 2>/dev/null
 ```
 
+**RULE: Always extract cover from source FIRST before searching online.**
+
 | Property | Value | Reason |
-|----------|-------|--------|
-| Max dimension | 600x600 | Standard for audio players |
-| Quality | `q:v 2` (~95% JPEG quality) | Balance quality/size |
-| Max file size | ~50-100KB | Avoids bloat in audio container |
+|----------|-------|-------|
+| Method | Copy video stream | Preserves quality |
+| Max dimension | Inherited | From source |
+| Fallback | Online search | If no source cover |
 
 **Error handling**: If no artwork extracted, proceed to Step 3 (web search for cover art).
 
@@ -77,17 +135,28 @@ If source WAV has no embedded artwork, search online:
 # Deezer API (fast, reliable)
 curl -sL "https://api.deezer.com/search/album?q={artist}+{title}" | jq -r '.data[0].cover_big'
 
-# MusicBrainz Cover Art Archive
-curl -sL "https://coverartarchive.org/release/{musicbrainz_release_id}/front"
+# Bandcamp (requires web search for URL, then scrape page)
+curl -sL "https://{bandcamp_url}" | grep -oP 'og:image" content="\K[^"]+'
+
+# SoundCloud (scraped from page og:image)
+curl -sL "https://soundcloud.com/{user}/{track}" | grep -oP 'og:image" content="\K[^"]+'
 ```
 
-**Download priority**: Deezer → MusicBrainz → Discogs → Google Images
+**Download priority**: Deezer → Bandcamp → SoundCloud → MusicBrainz → Discogs
 
 | Source | URL | Notes |
 |--------|-----|-------|
 | Deezer | api.deezer.com/search/album | Fast JSON API, direct image URLs |
+| Bandcamp | bandcamp.com | High quality artwork, scrape from page |
+| SoundCloud | soundcloud.com | Extract handle from brackets (e.g., [COPPADOS]), try common free download handles |
 | MusicBrainz | coverartarchive.org | Authoritative, needs release ID |
 | Discogs | discogs.com | Image scraping required |
+
+**SoundCloud Search Strategy**:
+1. Extract handle from brackets in filename: `Track [handle]` → `soundcloud.com/handle/...`
+2. If no brackets, try artist name as handle
+3. Fallback: Try common free download handles (`gsfreedls`, `freedls`, etc.)
+4. Strip remix/edit/master/loud/dub keywords from track slug
 
 **Error handling**: If no cover found online, skip artwork embedding (optional metadata).
 
@@ -110,25 +179,43 @@ Source metadata complete? ──YES──> Proceed to Step 5
 
 ### Online Search Priority
 
-1. **MusicBrainz** (coverartarchive.org) — Authoritative, includes ISRC
-2. **Discogs** — Physical release data
-3. **Beatport** — Official digital releases
-4. **SoundCloud/Spotify** — Lower confidence (may be remixes/covers)
+1. **Deezer** — Fast API, direct image URLs
+2. **Bandcamp** — High quality artwork, official releases
+3. **SoundCloud** — Extract handle from filename (e.g., [COPPADOS]), scrape cover from track page
+4. **MusicBrainz** (coverartarchive.org) — Authoritative, includes ISRC
+5. **Discogs** — Physical release data
+6. **Beatport** — Official digital releases
 
 | Source | Confidence | Notes |
 |--------|------------|-------|
+| Bandcamp | High | Best artwork quality, official releases |
 | MusicBrainz | High | Best for metadata accuracy |
 | Discogs | High | Reliable for releases |
 | Beatport | High | Official digital |
-| SoundCloud | Medium | May differ from original |
-| Spotify | Medium | Verify carefully |
+| Deezer | High | Fast JSON API, reliable |
+| SoundCloud | Medium | Best for remixes/edits from SC creators |
 
 ### Track Not Found Online?
 
 1. Use filename to extract artist/title if formatted clearly
 2. Search by partial title or known artist only
-3. Mark metadata as "Unknown Artist - {filename}" with confidence: low
-4. Document what was attempted in comments
+3. **Use web search**: The agent's `websearch` tool can find tracks on SoundCloud, Bandcamp, etc. when API searches fail
+4. Mark metadata as "Unknown Artist - {filename}" with confidence: low
+5. Document what was attempted in comments
+
+### Using Web Search for Track Discovery
+
+When Deezer/Bandcamp API returns no results, use the agent's web search:
+
+```
+/search <artist> <title> site:bandcamp.com
+/search <artist> <title> site:soundcloud.com
+```
+
+Found URLs can be used to extract cover art via:
+```bash
+curl -sL "https://bandcamp.com/artist/track" | grep -oP 'og:image" content="\K[^"]+'
+```
 
 ---
 
@@ -181,8 +268,8 @@ ffmpeg -y -i "output.m4a" \
 ## Step 7: Verification
 
 ```bash
-# Verify metadata
-ffprobe -v quiet -show_format "final.m4a" | grep -E "title|artist|album|genre|date|size"
+# Verify metadata (must show title, artist, album, genre)
+ffprobe -v quiet -show_format "final.m4a" | grep -E "TAG:title|TAG:artist|TAG:album|TAG:genre"
 
 # Verify streams + artwork
 ffprobe -v quiet -show_streams "final.m4a" | grep -E "codec_name|attached_pic"
@@ -190,13 +277,33 @@ ffprobe -v quiet -show_streams "final.m4a" | grep -E "codec_name|attached_pic"
 
 Expected output:
 ```
+TAG:title=Track Title
+TAG:artist=Artist Name
+TAG:album=Album Name
+TAG:genre=Genre
 codec_name=aac
 DISPOSITION:attached_pic=0
 codec_name=mjpeg
 DISPOSITION:attached_pic=1
 ```
 
-**Error handling**: If `attached_pic=1` missing, cover art failed — re-run Step 6.
+**CRITICAL**: If ANY metadata is missing, the file is CORRUPTED. Re-run from Step 5.
+
+### Verification Checklist
+
+| Check | Command | Pass Condition |
+|-------|---------|----------------|
+| Has audio | `codec_name=aac` | Must exist |
+| Has artwork | `attached_pic=1` | Must exist for mjpeg stream |
+| Has title | `TAG:title=` | Must not be empty |
+| Has artist | `TAG:artist=` | Must not be empty |
+| Has album | `TAG:album=` | Recommended |
+| Has genre | `TAG:genre=` | Recommended |
+
+**Error handling**:
+- `attached_pic=1` missing → Cover art failed. Delete file, re-run Steps 5-6
+- Metadata missing → Delete file, re-run Steps 5-6 with correct metadata
+- File size < 1MB for >1min audio → Likely corrupted, re-convert
 
 ---
 
@@ -221,16 +328,27 @@ For remixes:
 | Clipping after encoding | Increase gain reduction by 0.5-1.0 dB |
 | Loudnorm analysis fails | Check ffmpeg version supports filter |
 | No metadata found online | Use filename extraction, mark confidence low |
+| Metadata disappeared after re-muxing | Re-encode from source WAV, do not copy from existing M4A |
+| Artwork disappeared after re-muxing | Re-run embed step, ensure `-disposition:1 attached_pic` |
+
+### Critical Rules
+
+1. **ALWAYS verify output after encoding** — Check metadata AND artwork BEFORE deleting source WAV
+2. **Never modify M4A in-place** — Always re-encode from source WAV, never copy streams from a broken M4A
+3. **Delete and retry** — If verification fails, delete the bad file and start over from Step 5
+4. **Preserve source** — Source WAV files are the master; M4A is derived
 
 ---
 
 ## Cleanup
 
-After successful conversion, remove temporary files:
+After successful conversion, temporary files are automatically removed:
 
 ```bash
-rm -f cover.jpg output.m4a analysis.json
+rm -f cover_*.jpg output_*.m4a
 ```
+
+**JSON result files** are only created if conversion fails (for debugging).
 
 **Preserve**:
 - Source WAV files (do not delete)

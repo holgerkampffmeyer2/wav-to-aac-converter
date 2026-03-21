@@ -8,7 +8,7 @@ Converts WAV audio files to high-quality AAC (.m4a) format with:
 
 - **Loudness normalization** — Analyzes true peak and integrated loudness, applies gain to prevent clipping
 - **Metadata extraction** — Pulls existing tags from source files
-- **Web lookup** — Searches MusicBrainz/Discogs/Beatport for missing metadata
+- **Web lookup** — Searches Deezer/Bandcamp/SoundCloud for missing metadata and cover art
 - **Cover art** — Extracts or downloads album artwork, embeds into final file
 - **Verification** — Confirms metadata and artwork are properly embedded
 
@@ -17,20 +17,22 @@ Converts WAV audio files to high-quality AAC (.m4a) format with:
 ```bash
 # Install dependencies (Ubuntu/WSL)
 sudo apt update
-sudo apt install ffmpeg ffprobe
-
-# Run conversion (see AGENTS.md for full workflow)
-ffmpeg -i "input.wav" -af loudnorm=print_format=json -f null - 2>&1 | grep -A 20 '^\{$'
+sudo apt install python3 ffmpeg ffprobe
 ```
+
+### Prompt to start the conversion flow
+
+> "Convert all WAV files in this directory to AAC using the workflow from AGENTS.md."
 
 ## Tech Stack
 
 | Component | Recommendation |
 |-----------|----------------|
 | OS | **WSL2** (Ubuntu 22.04+) |
-| AI Assistant | **opencode** |
+| AI Assistant | **[opencode](https://opencode.ai)** |
 | Audio Tools | `ffmpeg`, `ffprobe` |
-| Web Search | Built into opencode |
+| Scripting | `python3` (convert.py) |
+| Web Search | Built into opencode + Deezer/Bandcamp/SoundCloud APIs |
 
 ### Install FFmpeg on WSL
 
@@ -56,6 +58,7 @@ See [AGENTS.md](AGENTS.md) for complete workflow instructions.
 optimize-music-prompts/
 ├── AGENTS.md                    # Agent instructions
 ├── README.md                    # This file
+├── convert.py                  # Python converter script
 audio files
 ├── *.wav                        # Source
 └── *.m4a                        # Converted output
