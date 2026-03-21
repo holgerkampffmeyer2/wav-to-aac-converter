@@ -65,11 +65,35 @@ ffmpeg -y -i "input.wav" -vf "scale=600:600:force_original_aspect_ratio=decrease
 | Quality | `q:v 2` (~95% JPEG quality) | Balance quality/size |
 | Max file size | ~50-100KB | Avoids bloat in audio container |
 
-**Error handling**: If no artwork extracted, proceed to Step 3 (web search).
+**Error handling**: If no artwork extracted, proceed to Step 3 (web search for cover art).
 
 ---
 
-## Step 3: Decision Gate — Metadata Status
+## Step 3: Online Cover Art Search
+
+If source WAV has no embedded artwork, search online:
+
+```bash
+# Deezer API (fast, reliable)
+curl -sL "https://api.deezer.com/search/album?q={artist}+{title}" | jq -r '.data[0].cover_big'
+
+# MusicBrainz Cover Art Archive
+curl -sL "https://coverartarchive.org/release/{musicbrainz_release_id}/front"
+```
+
+**Download priority**: Deezer → MusicBrainz → Discogs → Google Images
+
+| Source | URL | Notes |
+|--------|-----|-------|
+| Deezer | api.deezer.com/search/album | Fast JSON API, direct image URLs |
+| MusicBrainz | coverartarchive.org | Authoritative, needs release ID |
+| Discogs | discogs.com | Image scraping required |
+
+**Error handling**: If no cover found online, skip artwork embedding (optional metadata).
+
+---
+
+## Step 4: Decision Gate — Metadata Status
 
 ```
 Source metadata complete? ──YES──> Proceed to Step 5
@@ -81,7 +105,7 @@ Source metadata complete? ──YES──> Proceed to Step 5
 ```
 
 ### Metadata Complete?
-- Has title, artist, genre, year? → **Skip to Step 5**
+- Has title, artist, genre, year? → **Proceed to Step 5**
 - Missing critical fields (title/artist)? → **Search online**
 
 ### Online Search Priority
@@ -108,7 +132,7 @@ Source metadata complete? ──YES──> Proceed to Step 5
 
 ---
 
-## Step 4: AAC Encoding
+## Step 5: AAC Encoding
 
 ```bash
 ffmpeg -y -i "input.wav" \
@@ -126,7 +150,7 @@ ffmpeg -y -i "input.wav" \
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| Bitrate | 320k | High quality minimum |
+| Bitrate | 320k target | Actual may vary (VBR) - document real bitrate |
 | Sample Rate | Inherited | From source |
 | Codec | AAC-LC | Best compatibility |
 | Gain | Calculated | Prevents clipping |
@@ -135,7 +159,7 @@ ffmpeg -y -i "input.wav" \
 
 ---
 
-## Step 5: Embed Cover Art
+## Step 6: Embed Cover Art
 
 ```bash
 ffmpeg -y -i "output.m4a" \
@@ -154,7 +178,7 @@ ffmpeg -y -i "output.m4a" \
 
 ---
 
-## Step 6: Verification
+## Step 7: Verification
 
 ```bash
 # Verify metadata
@@ -172,7 +196,7 @@ codec_name=mjpeg
 DISPOSITION:attached_pic=1
 ```
 
-**Error handling**: If `attached_pic=1` missing, cover art failed — re-run Step 5.
+**Error handling**: If `attached_pic=1` missing, cover art failed — re-run Step 6.
 
 ---
 

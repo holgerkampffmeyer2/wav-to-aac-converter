@@ -56,7 +56,8 @@ See [AGENTS.md](AGENTS.md) for complete workflow instructions.
 optimize-music-prompts/
 ├── AGENTS.md                    # Agent instructions
 ├── README.md                    # This file
-├── *.wav                        # Source audio files
+audio files
+├── *.wav                        # Source
 └── *.m4a                        # Converted output
 ```
 
