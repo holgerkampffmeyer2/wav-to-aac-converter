@@ -1,0 +1,37 @@
+# Source files
+*.wav
+*.flac
+*.ogg
+*.mp3
+*.aiff
+
+# Encoded results
+*.m4a
+*.aac
+
+# Cover art
+*.jpg
+*.jpeg
+*.png
+*.webp
+
+# Temporary files
+temp*.m4a
+temp*.wav
+*.tmp
+*.part
+
+# Logs
+*.log
+ffmpeg*.log
+
+# Analysis outputs
+*.json
+*_analysis.txt
+
+# Working directories
+optimize-music-prompts/
+
+# OS files
+.DS_Store
+Thumbs.db
