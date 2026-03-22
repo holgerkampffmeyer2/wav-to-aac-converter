@@ -21,8 +21,21 @@ The agent handles:
 
 ## Usage
 
+### Via AI Agent (Recommended)
+
+Open an AI coding assistant in this directory and prompt:
+
+```
+Convert all WAV files to AAC using the workflow from AGENTS.md.
+```
+
+Example for opencode:
 ```bash
-# Run via AI agent with:
+opencode
+# Then paste: Convert all WAV files to AAC using the workflow from AGENTS.md.
+```
+
+### Via Command Line
 python convert.py <file.wav>              # Single file
 python convert.py *.wav                   # Batch (auto-parallel for 4+ files)
 python convert.py file1.wav file2.wav    # Multiple files
