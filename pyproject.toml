@@ -1,0 +1,29 @@
+[project]
+name = "optimize-music-prompts"
+version = "2.0.0"
+description = "WAV to AAC converter with loudness normalization, metadata, and cover art"
+authors = [
+    {name = "Holger Kampffmeyer", email = "holger.kampffmeyer+dj@gmail.com"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = []
+
+[project.scripts]
+convert = "convert:convert_file"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
