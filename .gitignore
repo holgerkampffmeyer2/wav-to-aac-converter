@@ -40,3 +40,10 @@ Thumbs.db
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/
+.pytest_cache/
+
+# Convert.py temp files
+cover_*.jpg
+output_*.m4a
+result_*.json
