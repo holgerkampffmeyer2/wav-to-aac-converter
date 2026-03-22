@@ -1,6 +1,6 @@
 # wav-to-aac-converter
 
-![AI-Powered Audio Conversion](ai-powered.png)
+![AI-Powered Audio Conversion](assets/ai-powered.png)
 
 AI-agent driven WAV to AAC conversion with loudness normalization, metadata extraction, and cover art embedding. Designed to be controlled by AI coding assistants like [opencode](https://opencode.ai) or Claude Code.
 
@@ -64,6 +64,7 @@ sudo apt install ffmpeg python3
 
 ```
 wav-to-aac-converter/
+├── assets/            # Images and static assets
 ├── AGENTS.md          # AI agent workflow instructions
 ├── README.md          # This file
 ├── convert.py         # Python converter script
