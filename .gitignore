@@ -9,11 +9,12 @@
 *.m4a
 *.aac
 
-# Cover art
+# Cover art (except in assets/)
 *.jpg
 *.jpeg
 *.png
 *.webp
+!assets/
 
 # Temporary files
 temp*.m4a
