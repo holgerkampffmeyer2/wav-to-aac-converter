@@ -1,6 +1,6 @@
-# Audio Conversion: WAV to MP3
+# Audio Conversion: WAV to MP3/M4A
 
-AI agent workflow for converting WAV files to high-quality MP3 with loudness normalization and metadata. Designed for AI coding assistants like [opencode](https://opencode.ai) or Claude Code.
+AI agent workflow for converting WAV files to MP3 or M4A with loudness normalization and metadata. Designed for AI coding assistants like [opencode](https://opencode.ai) or Claude Code.
 
 ## Agent Instructions
 
@@ -34,16 +34,27 @@ sudo apt update && sudo apt install ffmpeg python3
 ## Quick Start
 
 ```bash
+# MP3 output (default)
 python3 convert.py <file.wav>              # Single file
 python3 convert.py *.wav                   # Batch (auto-parallel for 4+ files)
-python3 convert.py file1.wav file2.wav    # Multiple files
+
+# M4A output
+python3 convert.py --m4a <file.wav>        # Single file to M4A
+python3 convert.py --m4a *.wav             # Batch to M4A
 ```
+
+## Output Format Selection
+
+| Flag | Output | Codec |
+|------|--------|-------|
+| (default) | MP3 | libmp3lame, 320kbps |
+| `--m4a` | M4A | AAC, 320kbps |
 
 ## Workflow Steps
 
 ### Single File (Sequential)
 ```
-Loudness Analysis → Metadata Extraction → Cover Search → MP3 Encoding → Embed Artwork → Verify
+Loudness Analysis → Metadata Extraction → Cover Search → Encoding → Embed Artwork → Verify
 ```
 
 ### Cover Artwork Strategy
@@ -65,20 +76,23 @@ Loudness Analysis → Metadata Extraction → Cover Search → MP3 Encoding → 
 | Deezer API rate limited | Wait 60s, then retry or skip to Bandcamp |
 | No cover found | Accept missing cover, continue encoding |
 | Encoding fails | Check WAV file integrity, try with stripped metadata |
-| All sources fail | Create MP3 without cover, log warning |
+| All sources fail | Create output without cover, log warning |
 
 ### Verification Checklist
 
 After conversion, agent should verify:
 
-- [ ] **MP3 Codec**: `ffprobe` shows `codec_name=mp3` or `codec_name=libmp3lame`
+- [ ] **Correct Codec**: MP3 (`codec_name=mp3`) or M4A (`codec_name=aac`)
 - [ ] **True Peak ≤ -0.1 dBTP**: Check with loudnorm analysis
 - [ ] **Cover embedded** (if available): Check stream tags in ffprobe output
 - [ ] **Metadata present**: Artist/Title visible in ffprobe output
 
 ```bash
-# Verification command
+# Verification command (MP3)
 ffprobe -v quiet -show_format -show_streams "output.mp3"
+
+# Verification command (M4A)
+ffprobe -v quiet -show_format -show_streams "output.m4a"
 ```
 
 ## Known Filename Patterns
@@ -108,7 +122,7 @@ sudo apt install ffmpeg python3
 
 ## Technical Details
 
-- **Codec**: MP3 (libmp3lame), 320kbps
+- **Codecs**: MP3 (libmp3lame) or M4A/AAC, 320kbps
 - **Loudness**: True Peak ≤ -0.1 dBTP (auto-calculated gain)
 - **Cover Sources**: Source → Local folder → Deezer → Bandcamp → SoundCloud
 - **Retry Logic**: 3 attempts with exponential backoff

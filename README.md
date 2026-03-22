@@ -2,7 +2,7 @@
 
 ![AI-Powered Audio Conversion](assets/ai-powered.png)
 
-AI-agent driven WAV to MP3 conversion with loudness normalization, metadata extraction, and cover art embedding. Designed to be controlled by AI coding assistants like [opencode](https://opencode.ai) or Claude Code.
+AI-agent driven WAV to MP3/M4A conversion with loudness normalization, metadata extraction, and cover art embedding. Designed to be controlled by AI coding assistants like [opencode](https://opencode.ai) or Claude Code.
 
 ## How It Works
 
@@ -31,6 +31,11 @@ Open an AI coding assistant in this directory and prompt:
 Convert all WAV files to MP3 using the workflow from AGENTS.md.
 ```
 
+Or for M4A output:
+```
+Convert all WAV files to M4A using the workflow from AGENTS.md.
+```
+
 Example for opencode:
 ```bash
 opencode
@@ -40,9 +45,16 @@ opencode
 ### Via Command Line
 
 ```bash
+# MP3 output (default)
 python3 convert.py <file.wav>              # Single file
 python3 convert.py *.wav                   # Batch (auto-parallel for 4+ files)
-python3 convert.py file1.wav file2.wav    # Multiple files
+
+# M4A output
+python3 convert.py --m4a <file.wav>        # Single file to M4A
+python3 convert.py --m4a *.wav            # Batch to M4A
+
+# Alternative format specification
+python3 convert.py --format m4a file.wav
 ```
 
 ## Prerequisites
@@ -56,9 +68,14 @@ sudo apt install ffmpeg python3
 
 | Setting | Value |
 |---------|-------|
-| Codec | MP3 (libmp3lame), 320kbps |
+| Codec | MP3 (libmp3lame) or M4A/AAC, 320kbps |
 | Loudness | True Peak ≤ -0.1 dBTP |
 | Cover Size | 600x600 px |
+
+### Output Formats
+
+- **MP3** (default): Universal compatibility, great for streaming
+- **M4A/AAC**: Better quality at same bitrate, Apple ecosystem
 
 ## Cover Artwork Strategy
 
@@ -77,7 +94,7 @@ wav-to-mp3-converter/
 ├── pyproject.toml     # Python project config
 ├── tests/             # Test files
 ├── *.wav              # Source files
-└── *.mp3              # Converted output
+└── *.mp3 / *.m4a      # Converted output
 ```
 
 ## For AI Agents

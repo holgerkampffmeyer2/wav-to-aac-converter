@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WAV to MP3 converter with loudness normalization, metadata, and cover art."""
+"""WAV to MP3/M4A converter with loudness normalization, metadata, and cover art."""
 
 import subprocess
 import json
@@ -7,11 +7,13 @@ import sys
 import os
 import re
 import time
+import argparse
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import wraps
 
 MAX_PARALLEL_PROCESSES = 5
+OUTPUT_FORMAT = 'mp3'
 
 OG_IMAGE_RE = re.compile(r'"og:image"\s+content="([^"]+)"')
 BANDCAMP_URL_RE = re.compile(r'https?://[^\s"\'<>]*\.bandcamp\.com/(?:track|album)/[^\s"\'<>]*')
@@ -402,6 +404,17 @@ def encode_mp3(wav_path, output_path, metadata, gain_db):
     return success
 
 
+def encode_m4a(wav_path, output_path, metadata, gain_db):
+    """Encode WAV to M4A/AAC with metadata."""
+    cmd = f'ffmpeg -y -i "{wav_path}" -map 0:a -af "volume={gain_db}dB" -c:a aac -b:a 320k'
+    for key, value in metadata.items():
+        if value and isinstance(value, str):
+            cmd += f' -metadata {key}="{value}"'
+    cmd += f' -movflags +use_metadata_tags "{output_path}"'
+    success, _, stderr = run_cmd(cmd)
+    return success
+
+
 def embed_cover_mp3(mp3_path, cover_path, final_path):
     """Embed cover art into MP3 using ffmpeg."""
     cmd = f'ffmpeg -y -i "{mp3_path}" -i "{cover_path}" -map 0:a -map 1:v -c:a copy -c:v copy -id3v2_version 3 -metadata:s:v title="Album cover" -metadata:s:v mimetype="image/jpeg" "{final_path}"'
@@ -409,24 +422,34 @@ def embed_cover_mp3(mp3_path, cover_path, final_path):
     return success
 
 
-def verify_output(mp3_path) -> tuple[bool, dict[str, bool] | str]:
-    """Verify MP3 output."""
-    cmd = f'ffprobe -v quiet -show_format -show_streams "{mp3_path}"'
+def embed_cover_m4a(m4a_path, cover_path, final_path):
+    """Embed cover art into M4A."""
+    cmd = f'ffmpeg -y -i "{m4a_path}" -i "{cover_path}" -c:a copy -c:v copy -map 0:a -map 1:v -disposition:1 attached_pic "{final_path}"'
+    success, _, _ = run_cmd(cmd)
+    return success
+
+
+def verify_output(output_path, fmt) -> tuple[bool, dict[str, bool] | str]:
+    """Verify output file."""
+    cmd = f'ffprobe -v quiet -show_format -show_streams "{output_path}"'
     success, stdout, _ = run_cmd(cmd)
     if not success:
         return False, "Failed to read file"
     
-    has_mp3 = 'codec_name=mp3' in stdout or 'codec_name=libmp3lame' in stdout
+    if fmt == 'mp3':
+        has_codec = 'codec_name=mp3' in stdout or 'codec_name=libmp3lame' in stdout
+    else:
+        has_codec = 'codec_name=aac' in stdout
     has_cover = 'attached_pic=1' in stdout or 'stream_tags' in stdout
-    info: dict[str, bool] = {"mp3": has_mp3, "cover": has_cover}
+    info: dict[str, bool] = {fmt: has_codec, "cover": has_cover}
     return True, info
 
 
-def save_result_json(wav_path, metadata, loudness, output_name, success, has_cover=False):
+def save_result_json(wav_path, metadata, loudness, output_name, success, has_cover=False, fmt='mp3'):
     """Save conversion result to JSON file."""
     result = {
         "source_wav": str(wav_path),
-        "output_mp3": output_name if success else None,
+        f"output_{fmt}": output_name if success else None,
         "success": success,
         "metadata": metadata,
         "loudness": loudness,
@@ -437,17 +460,17 @@ def save_result_json(wav_path, metadata, loudness, output_name, success, has_cov
         json.dump(result, f, indent=2)
 
 
-def convert_file(wav_path):
-    """Convert a single WAV file to MP3."""
-    print(f"Processing: {wav_path}")
+def convert_file(wav_path, fmt='mp3'):
+    """Convert a single WAV file to MP3 or M4A."""
+    print(f"Processing: {wav_path} -> {fmt.upper()}")
     
     wav_path = str(wav_path)
     base_name = Path(wav_path).stem
-    output_name = base_name + '.mp3'
+    output_name = base_name + f'.{fmt}'
     
     file_hash = hash(wav_path) % 1000000
     temp_cover = f'cover_{file_hash}.jpg'
-    temp_output = f'output_{file_hash}.mp3'
+    temp_output = f'output_{file_hash}.{fmt}'
     
     loudness = analyze_loudness(wav_path)
     if not loudness:
@@ -520,17 +543,25 @@ def convert_file(wav_path):
             else:
                 print(f"  Cover: Not found")
     
-    success = encode_mp3(wav_path, temp_output, metadata, gain_db)
+    if fmt == 'mp3':
+        success = encode_mp3(wav_path, temp_output, metadata, gain_db)
+    else:
+        success = encode_m4a(wav_path, temp_output, metadata, gain_db)
+    
     if not success:
         print(f"  FAIL: Encoding failed")
-        save_result_json(wav_path, metadata, loudness, output_name, False, False)
+        save_result_json(wav_path, metadata, loudness, output_name, False, False, fmt)
         for f in [temp_output, temp_cover]:
             if f and Path(f).exists():
                 os.remove(f)
         return False, None
     
     if cover_path and Path(cover_path).exists():
-        embed_success = embed_cover_mp3(temp_output, cover_path, output_name)
+        if fmt == 'mp3':
+            embed_success = embed_cover_mp3(temp_output, cover_path, output_name)
+        else:
+            embed_success = embed_cover_m4a(temp_output, cover_path, output_name)
+        
         if embed_success:
             for f in [temp_output, temp_cover, cover_path]:
                 if f and f != cover_path and Path(f).exists():
@@ -538,35 +569,37 @@ def convert_file(wav_path):
             if cover_path == temp_cover and Path(temp_cover).exists():
                 os.remove(temp_cover)
         else:
-            print(f"  FAIL: Cover embedding failed, using raw MP3")
+            print(f"  FAIL: Cover embedding failed, using raw file")
             os.rename(temp_output, output_name)
             if cover_path == temp_cover and Path(temp_cover).exists():
                 os.remove(temp_cover)
     else:
         os.rename(temp_output, output_name)
     
-    valid, result = verify_output(output_name)
+    valid, result = verify_output(output_name, fmt)
     info = result if isinstance(result, dict) else {}
     if valid:
-        print(f"  SUCCESS: {output_name} (MP3: {info.get('mp3')}, Cover: {info.get('cover')})")
+        print(f"  SUCCESS: {output_name} ({fmt.upper()}: {info.get(fmt)}, Cover: {info.get('cover')})")
         return True, output_name
     else:
         print(f"  FAIL: Verification failed - {result}")
-        save_result_json(wav_path, metadata, loudness, output_name, False, bool(info.get('cover')))
+        save_result_json(wav_path, metadata, loudness, output_name, False, bool(info.get('cover')), fmt)
         return False, None
 
 
-def _convert_file_wrapper(wav_path):
+def _convert_file_wrapper(args):
     """Wrapper for parallel processing."""
-    success, output = convert_file(wav_path)
+    wav_path, fmt = args
+    success, output = convert_file(wav_path, fmt)
     return (wav_path, success, output)
 
 
-def convert_batch(file_paths, parallel=True, max_workers=MAX_PARALLEL_PROCESSES):
+def convert_batch(file_paths, fmt='mp3', parallel=True, max_workers=MAX_PARALLEL_PROCESSES):
     """Convert multiple WAV files.
     
     Args:
         file_paths: List of WAV file paths
+        fmt: Output format ('mp3' or 'm4a')
         parallel: Use parallel processing (default: True)
         max_workers: Max parallel processes (default: 5)
     
@@ -577,37 +610,63 @@ def convert_batch(file_paths, parallel=True, max_workers=MAX_PARALLEL_PROCESSES)
     
     if not parallel or len(file_paths) < 4:
         for wav_path in file_paths:
-            results.append(_convert_file_wrapper(wav_path))
+            results.append(_convert_file_wrapper((wav_path, fmt)))
         return results
     
     print(f"Converting {len(file_paths)} files in parallel (max {max_workers} workers)...")
     
     with ProcessPoolExecutor(max_workers=min(max_workers, len(file_paths))) as executor:
-        futures = {executor.submit(_convert_file_wrapper, fp): fp for fp in file_paths}
+        futures = {executor.submit(_convert_file_wrapper, (fp, fmt)): fp for fp in file_paths}
         for future in as_completed(futures):
             results.append(future.result())
     
     return results
 
 
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description='WAV to MP3/M4A converter with loudness normalization and cover art.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  python3 convert.py song.wav                      # Convert to MP3 (default)
+  python3 convert.py --m4a song.wav               # Convert to M4A
+  python3 convert.py --format m4a song.wav         # Convert to M4A (long form)
+  python3 convert.py --mp3 *.wav                   # Batch convert to MP3
+  python3 convert.py --m4a folder/*.wav            # Batch convert to M4A
+'''
+    )
+    format_group = parser.add_mutually_exclusive_group()
+    format_group.add_argument('--mp3', action='store_true', help='Output MP3 format (default)')
+    format_group.add_argument('--m4a', action='store_true', help='Output M4A/AAC format')
+    parser.add_argument('--format', choices=['mp3', 'm4a'], default='mp3',
+                       help='Output format (default: mp3)')
+    parser.add_argument('files', nargs='+', help='WAV file(s) to convert')
+    return parser.parse_args()
+
+
 if __name__ == '__main__':
-    if len(sys.argv) < 2:
-        print("Usage: python convert.py <wav_file> [wav_file2 ...]")
-        print("       python convert.py *.wav  # Batch mode (parallel for 4+ files)")
-        sys.exit(1)
+    args = parse_args()
     
-    files = sys.argv[1:]
-    wav_files = [f for f in files if f.endswith('.wav') or f.endswith('.WAV')]
+    wav_files = [f for f in args.files if f.endswith('.wav') or f.endswith('.WAV')]
     
     if not wav_files:
         print("Error: No WAV files found")
         sys.exit(1)
     
+    if args.m4a:
+        fmt = 'm4a'
+    else:
+        fmt = args.format
+    
+    print(f"Output format: {fmt.upper()}")
+    
     if len(wav_files) == 1:
-        success, output = convert_file(wav_files[0])
+        success, output = convert_file(wav_files[0], fmt)
         sys.exit(0 if success else 1)
     
-    results = convert_batch(wav_files)
+    results = convert_batch(wav_files, fmt)
     
     success_count = sum(1 for _, s, _ in results if s)
     print(f"\nBatch complete: {success_count}/{len(results)} succeeded")
