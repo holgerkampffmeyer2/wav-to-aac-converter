@@ -1,6 +1,14 @@
 # Audio Conversion: WAV to AAC
 
-Automated workflow for converting WAV files to high-quality AAC with loudness normalization and metadata.
+AI agent workflow for converting WAV files to high-quality AAC with loudness normalization and metadata. Designed for AI coding assistants like [opencode](https://opencode.ai) or Claude Code.
+
+## Agent Instructions
+
+When an AI agent encounters this project, it should:
+1. Read this file to understand the conversion workflow
+2. Execute `convert.py` with appropriate arguments
+3. Monitor for errors and handle retries
+4. Report results to the user
 
 ## Quick Start
 
@@ -10,7 +18,7 @@ python convert.py *.wav                   # Batch (auto-parallel for 4+ files)
 python convert.py file1.wav file2.wav    # Multiple files
 ```
 
-## Workflow Types
+## Workflow Steps
 
 ### Single File (Sequential)
 ```
@@ -22,20 +30,10 @@ Loudness Analysis → Metadata Extraction → Cover Search → AAC Encoding → 
 - **Max workers**: 5 parallel processes
 - **Fallback**: <4 files processed sequentially
 
-## Usage
+## Prerequisites
 
 ```bash
-# Prerequisites
 sudo apt install ffmpeg python3
-
-# Single conversion
-python convert.py "Artist - Title.wav"
-
-# Batch conversion (auto-parallel)
-python convert.py *.wav
-
-# Run tests
-python3 test_convert.py
 ```
 
 ## Known Filename Patterns

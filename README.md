@@ -1,78 +1,70 @@
-# optimize-music-prompts
+# wav-to-aac-converter
 
 ![AI-Powered Audio Conversion](ai-powered.png)
 
-Automated WAV to AAC conversion with loudness normalization, metadata extraction, and cover art embedding.
+AI-agent driven WAV to AAC conversion with loudness normalization, metadata extraction, and cover art embedding. Designed to be controlled by AI coding assistants like [opencode](https://opencode.ai) or Claude Code.
 
-## What This Does
+## How It Works
 
-Converts WAV audio files to high-quality AAC (.m4a) format with:
+An AI agent reads `AGENTS.md` and executes the conversion workflow:
 
-- **Loudness normalization** — Analyzes true peak and integrated loudness, applies gain to prevent clipping
-- **Metadata extraction** — Pulls existing tags from source files
-- **Web lookup** — Searches Deezer/Bandcamp/SoundCloud for missing metadata and cover art
-- **Cover art** — Extracts or downloads album artwork, embeds into final file
-- **Verification** — Confirms metadata and artwork are properly embedded
-
-## Quick Start
-
-```bash
-# Install dependencies (Ubuntu/WSL)
-sudo apt update
-sudo apt install python3 ffmpeg ffprobe
+```
+AI Agent reads AGENTS.md → Executes convert.py → Monitors results
 ```
 
-### Prompt to start the conversion flow
+The agent handles:
+- File discovery and batch processing decisions
+- Loudness analysis and gain calculation
+- Metadata extraction from files or web search
+- Cover art download from Deezer/Bandcamp/SoundCloud
+- Verification and error handling
 
-> "Convert all WAV files in this directory to AAC using the workflow from AGENTS.md."
+## Usage
 
-## Tech Stack
+```bash
+# Run via AI agent with:
+python convert.py <file.wav>              # Single file
+python convert.py *.wav                   # Batch (auto-parallel for 4+ files)
+python convert.py file1.wav file2.wav    # Multiple files
+```
 
-| Component | Recommendation |
-|-----------|----------------|
-| OS | **WSL2** (Ubuntu 22.04+) |
-| AI Assistant | **[opencode](https://opencode.ai)** |
-| Audio Tools | `ffmpeg`, `ffprobe` |
-| Scripting | `python3` (convert.py) |
-| Web Search | Built into opencode + Deezer/Bandcamp/SoundCloud APIs |
-
-### Install FFmpeg on WSL
+## Prerequisites
 
 ```bash
 sudo apt update
-sudo apt install ffmpeg
+sudo apt install ffmpeg python3
 ```
 
-Verify installation:
+## Technical Details
 
-```bash
-ffmpeg -version
-ffprobe -version
-```
-
-## Documentation
-
-See [AGENTS.md](AGENTS.md) for complete workflow instructions.
+| Setting | Value |
+|---------|-------|
+| Codec | AAC-LC, 320kbps |
+| Loudness | True Peak ≤ -0.1 dBTP |
+| Cover Size | 600x600 px |
 
 ## File Structure
 
 ```
-optimize-music-prompts/
-├── AGENTS.md                    # Agent instructions
-├── README.md                    # This file
-├── convert.py                  # Python converter script
-audio files
-├── *.wav                        # Source
-└── *.m4a                        # Converted output
+wav-to-aac-converter/
+├── AGENTS.md          # AI agent workflow instructions
+├── README.md          # This file
+├── convert.py         # Python converter script
+├── pyproject.toml     # Python project config
+├── tests/             # Test files
+├── *.wav              # Source files
+└── *.mrma             # Converted output
 ```
+
+## For AI Agents
+
+See [AGENTS.md](AGENTS.md) for complete workflow instructions that AI assistants will follow.
 
 ## License
 
 MIT
 
 ---
-
-## Contact
 
 **Holger Kampffmeyer** (DJ Hulk)
 
