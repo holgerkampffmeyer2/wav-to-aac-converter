@@ -268,6 +268,45 @@ class TestEdgeCases(unittest.TestCase):
         self.assertEqual(artist, "Here Comes That Sound Again")
         self.assertEqual(title, "Clean")
 
+    def test_dirty_suffix(self):
+        """Filename ends with 'Dirty' after separator."""
+        artist, title = extract_metadata_from_filename("Track Name - Dirty.wav")
+        self.assertEqual(artist, "Track Name")
+        self.assertEqual(title, "Dirty")
+
+    def test_radio_suffix(self):
+        """Filename ends with 'Radio' after separator."""
+        artist, title = extract_metadata_from_filename("Song - Radio Edit.wav")
+        self.assertEqual(artist, "Song")
+        self.assertEqual(title, "Radio Edit")
+
+    def test_master_suffix(self):
+        """Filename ends with 'Master' after separator."""
+        artist, title = extract_metadata_from_filename("Track - Master.wav")
+        self.assertEqual(artist, "Track")
+        self.assertEqual(title, "Master")
+
+    def test_extended_suffix(self):
+        """Filename ends with 'Extended' after separator."""
+        artist, title = extract_metadata_from_filename("Track - Extended Mix.wav")
+        self.assertEqual(artist, "Track")
+        self.assertEqual(title, "Extended Mix")
+
+    def test_various_clean_suffixes(self):
+        """Various clean/dirty/radio/master suffixes after separator."""
+        cases = [
+            ("Track - Clean", "Track", "Clean"),
+            ("Track - Dirty", "Track", "Dirty"),
+            ("Track - Radio Edit", "Track", "Radio Edit"),
+            ("Track - Mastered", "Track", "Mastered"),
+            ("Track - Extended", "Track", "Extended"),
+            ("Track - Short Version", "Track", "Short Version"),
+        ]
+        for filename, expected_artist, expected_title in cases:
+            artist, title = extract_metadata_from_filename(filename)
+            self.assertEqual(artist, expected_artist, f"Failed for: {filename}")
+            self.assertEqual(title, expected_title, f"Failed for: {filename}")
+
     def test_multiple_artists_with_comma(self):
         """Multiple artists separated by commas."""
         artist, title = extract_metadata_from_filename("Artist1, Artist2, Artist3 - Title.wav")
