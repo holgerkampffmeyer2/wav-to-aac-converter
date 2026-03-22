@@ -262,6 +262,35 @@ class TestEdgeCases(unittest.TestCase):
         self.assertEqual(artist, "Kraftwerk")
         self.assertIn("Ä", title)
 
+    def test_clean_suffix(self):
+        """Filename ends with 'Clean' after separator."""
+        artist, title = extract_metadata_from_filename("Here Comes That Sound Again - Clean.wav")
+        self.assertEqual(artist, "Here Comes That Sound Again")
+        self.assertEqual(title, "Clean")
+
+    def test_multiple_artists_with_comma(self):
+        """Multiple artists separated by commas."""
+        artist, title = extract_metadata_from_filename("Artist1, Artist2, Artist3 - Title.wav")
+        self.assertEqual(artist, "Artist1, Artist2, Artist3")
+        self.assertEqual(title, "Title")
+
+    def test_track_number_in_title(self):
+        """Track number in title after artist."""
+        artist, title = extract_metadata_from_filename("Artist - Track Name - 1 - Extended Mix.wav")
+        self.assertEqual(artist, "Artist")
+        self.assertIn("Track Name", title)
+
+    def test_handle_at_end_of_title(self):
+        """Handle in brackets at end of title (not after artist)."""
+        handles = extract_handles("The Martinez Brothers - Song EDIT [NPSM].wav")
+        self.assertIn("npsm", handles)
+
+    def test_quotation_marks_in_title(self):
+        """Quotation marks in title."""
+        artist, title = extract_metadata_from_filename('Artist - "Kilo" (Remix).wav')
+        self.assertEqual(artist, "Artist")
+        self.assertIn("Kilo", title)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
