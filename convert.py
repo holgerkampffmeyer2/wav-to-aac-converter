@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WAV to AAC converter with loudness normalization, metadata, and cover art."""
+"""WAV to MP3 converter with loudness normalization, metadata, and cover art."""
 
 import subprocess
 import json
@@ -48,7 +48,7 @@ def retry(max_attempts=3, delay=1, backoff=2):
     return decorator
 
 
-def run_cmd(cmd, capture_output=True, timeout=30):
+def run_cmd(cmd, capture_output=True, timeout=600):
     """Run shell command and return output."""
     try:
         result = subprocess.run(
@@ -60,8 +60,8 @@ def run_cmd(cmd, capture_output=True, timeout=30):
 
 
 def analyze_loudness(wav_path):
-    """Analyze loudness of WAV file."""
-    cmd = f'ffmpeg -i "{wav_path}" -af loudnorm=print_format=json -f null - 2>&1'
+    """Analyze loudness of WAV file using first 5 minutes for speed."""
+    cmd = f'ffmpeg -t 300 -i "{wav_path}" -af loudnorm=print_format=json -f null - 2>&1'
     success, stdout, stderr = run_cmd(cmd)
     if not success:
         return None
@@ -346,6 +346,37 @@ def extract_metadata_from_filename(filename):
     return '', name.strip()
 
 
+def find_local_cover(wav_path):
+    """Find cover art (PNG/JPG) in the same directory as the WAV file.
+    
+    Strategy:
+    1. Look for cover.png/cover.jpg in same directory
+    2. Look for any image file matching the base name pattern
+    """
+    wav_dir = Path(wav_path).parent.resolve()
+    base_name = Path(wav_path).stem
+    
+    patterns = [
+        wav_dir / "cover.png",
+        wav_dir / "cover.jpg",
+        wav_dir / "cover.jpeg",
+        wav_dir / f"{base_name}.png",
+        wav_dir / f"{base_name}.jpg",
+        wav_dir / f"{base_name}.jpeg",
+    ]
+    
+    for pattern in patterns:
+        if pattern.exists():
+            return str(pattern)
+    
+    for ext in ['*.png', '*.jpg', '*.jpeg']:
+        for img in wav_dir.glob(ext):
+            if img.exists():
+                return str(img)
+    
+    return None
+
+
 def download_cover(url, output_path):
     """Download cover art from URL."""
     cmd = f'curl -sL "{url}" -o "{output_path}"'
@@ -360,34 +391,34 @@ def process_cover(cover_path, output_path):
     return success
 
 
-def encode_aac(wav_path, output_path, metadata, gain_db):
-    """Encode WAV to AAC with metadata."""
-    cmd = f'ffmpeg -y -i "{wav_path}" -map 0:a -af "volume={gain_db}dB" -c:a aac -b:a 320k'
+def encode_mp3(wav_path, output_path, metadata, gain_db):
+    """Encode WAV to MP3 with metadata."""
+    cmd = f'ffmpeg -y -i "{wav_path}" -map 0:a -af "volume={gain_db}dB" -c:a libmp3lame -b:a 320k'
     for key, value in metadata.items():
         if value and isinstance(value, str):
             cmd += f' -metadata {key}="{value}"'
-    cmd += f' -movflags +use_metadata_tags "{output_path}"'
+    cmd += f' "{output_path}"'
     success, _, stderr = run_cmd(cmd)
     return success
 
 
-def embed_cover(m4a_path, cover_path, final_path):
-    """Embed cover art into M4A."""
-    cmd = f'ffmpeg -y -i "{m4a_path}" -i "{cover_path}" -c:a copy -c:v copy -map 0:a -map 1:v -disposition:1 attached_pic "{final_path}"'
+def embed_cover_mp3(mp3_path, cover_path, final_path):
+    """Embed cover art into MP3 using ffmpeg."""
+    cmd = f'ffmpeg -y -i "{mp3_path}" -i "{cover_path}" -map 0:a -map 1:v -c:a copy -c:v copy -id3v2_version 3 -metadata:s:v title="Album cover" -metadata:s:v mimetype="image/jpeg" "{final_path}"'
     success, _, _ = run_cmd(cmd)
     return success
 
 
-def verify_output(m4a_path) -> tuple[bool, dict[str, bool] | str]:
-    """Verify M4A output."""
-    cmd = f'ffprobe -v quiet -show_format -show_streams "{m4a_path}"'
+def verify_output(mp3_path) -> tuple[bool, dict[str, bool] | str]:
+    """Verify MP3 output."""
+    cmd = f'ffprobe -v quiet -show_format -show_streams "{mp3_path}"'
     success, stdout, _ = run_cmd(cmd)
     if not success:
         return False, "Failed to read file"
     
-    has_aac = 'codec_name=aac' in stdout
-    has_cover = 'attached_pic=1' in stdout
-    info: dict[str, bool] = {"aac": has_aac, "cover": has_cover}
+    has_mp3 = 'codec_name=mp3' in stdout or 'codec_name=libmp3lame' in stdout
+    has_cover = 'attached_pic=1' in stdout or 'stream_tags' in stdout
+    info: dict[str, bool] = {"mp3": has_mp3, "cover": has_cover}
     return True, info
 
 
@@ -395,7 +426,7 @@ def save_result_json(wav_path, metadata, loudness, output_name, success, has_cov
     """Save conversion result to JSON file."""
     result = {
         "source_wav": str(wav_path),
-        "output_m4a": output_name if success else None,
+        "output_mp3": output_name if success else None,
         "success": success,
         "metadata": metadata,
         "loudness": loudness,
@@ -407,16 +438,16 @@ def save_result_json(wav_path, metadata, loudness, output_name, success, has_cov
 
 
 def convert_file(wav_path):
-    """Convert a single WAV file to AAC."""
+    """Convert a single WAV file to MP3."""
     print(f"Processing: {wav_path}")
     
     wav_path = str(wav_path)
     base_name = Path(wav_path).stem
-    output_name = base_name + '.m4a'
+    output_name = base_name + '.mp3'
     
     file_hash = hash(wav_path) % 1000000
     temp_cover = f'cover_{file_hash}.jpg'
-    temp_output = f'output_{file_hash}.m4a'
+    temp_output = f'output_{file_hash}.mp3'
     
     loudness = analyze_loudness(wav_path)
     if not loudness:
@@ -444,40 +475,52 @@ def convert_file(wav_path):
     
     metadata = {k: v for k, v in metadata.items() if isinstance(v, str)}
     
-    cover_path = temp_cover
+    cover_path = None
     web_metadata = None
     
-    cmd = f'ffmpeg -y -i "{wav_path}" -map 0:v -map -0:a -c:v copy "{cover_path}" 2>/dev/null'
+    cmd = f'ffmpeg -y -i "{wav_path}" -map 0:v -map -0:a -c:v copy "{temp_cover}" 2>/dev/null'
     success, _, _ = run_cmd(cmd)
-    if Path(cover_path).exists():
+    if Path(temp_cover).exists():
+        cover_path = temp_cover
         print(f"  Cover: Extracted from source")
     else:
-        search_title_clean = clean_title_for_search(search_title)
-        
-        cover_url = search_deezer_cover(search_artist, search_title_clean)
-        if cover_url:
-            download_cover(cover_url, temp_cover)
-            print(f"  Cover: Downloaded from Deezer")
-        elif search_artist or search_title:
-            cover_url = search_bandcamp_cover(search_artist, search_title_clean)
+        local_cover = find_local_cover(wav_path)
+        if local_cover:
+            if local_cover.lower().endswith('.png'):
+                success, _, _ = run_cmd(f'ffmpeg -y -i "{local_cover}" "{temp_cover}" 2>/dev/null')
+                if success and Path(temp_cover).exists():
+                    cover_path = temp_cover
+            else:
+                cover_path = local_cover
+            print(f"  Cover: Found local file")
+        else:
+            search_title_clean = clean_title_for_search(search_title)
+            
+            cover_url = search_deezer_cover(search_artist, search_title_clean)
             if cover_url:
                 download_cover(cover_url, temp_cover)
-                print(f"  Cover: Downloaded from Bandcamp")
-            else:
-                web_metadata, cover_url = search_soundcloud_web(search_artist, search_title, base_name)
+                print(f"  Cover: Downloaded from Deezer")
+            elif search_artist or search_title:
+                cover_url = search_bandcamp_cover(search_artist, search_title_clean)
                 if cover_url:
                     download_cover(cover_url, temp_cover)
-                    print(f"  Cover: Downloaded from SoundCloud")
-                    if web_metadata and not metadata.get('artist'):
-                        metadata['artist'] = web_metadata[0] or ''
-                    if web_metadata and not metadata.get('title'):
-                        metadata['title'] = web_metadata[1] or ''
-        
-        if not Path(cover_path).exists():
-            cover_path = None
-            print(f"  Cover: Not found")
+                    print(f"  Cover: Downloaded from Bandcamp")
+                else:
+                    web_metadata, cover_url = search_soundcloud_web(search_artist, search_title, base_name)
+                    if cover_url:
+                        download_cover(cover_url, temp_cover)
+                        print(f"  Cover: Downloaded from SoundCloud")
+                        if web_metadata and not metadata.get('artist'):
+                            metadata['artist'] = web_metadata[0] or ''
+                        if web_metadata and not metadata.get('title'):
+                            metadata['title'] = web_metadata[1] or ''
+            
+            if Path(temp_cover).exists():
+                cover_path = temp_cover
+            else:
+                print(f"  Cover: Not found")
     
-    success = encode_aac(wav_path, temp_output, metadata, gain_db)
+    success = encode_mp3(wav_path, temp_output, metadata, gain_db)
     if not success:
         print(f"  FAIL: Encoding failed")
         save_result_json(wav_path, metadata, loudness, output_name, False, False)
@@ -487,26 +530,25 @@ def convert_file(wav_path):
         return False, None
     
     if cover_path and Path(cover_path).exists():
-        embed_success = embed_cover(temp_output, cover_path, output_name)
+        embed_success = embed_cover_mp3(temp_output, cover_path, output_name)
         if embed_success:
-            if Path(cover_path).exists():
-                os.remove(cover_path)
-            if Path(temp_output).exists():
-                os.remove(temp_output)
-        else:
-            print(f"  FAIL: Cover embedding failed")
-            save_result_json(wav_path, metadata, loudness, output_name, False, False)
-            for f in [temp_output, temp_cover]:
-                if f and Path(f).exists():
+            for f in [temp_output, temp_cover, cover_path]:
+                if f and f != cover_path and Path(f).exists():
                     os.remove(f)
-            return False, None
+            if cover_path == temp_cover and Path(temp_cover).exists():
+                os.remove(temp_cover)
+        else:
+            print(f"  FAIL: Cover embedding failed, using raw MP3")
+            os.rename(temp_output, output_name)
+            if cover_path == temp_cover and Path(temp_cover).exists():
+                os.remove(temp_cover)
     else:
         os.rename(temp_output, output_name)
     
     valid, result = verify_output(output_name)
     info = result if isinstance(result, dict) else {}
     if valid:
-        print(f"  SUCCESS: {output_name} (AAC: {info.get('aac')}, Cover: {info.get('cover')})")
+        print(f"  SUCCESS: {output_name} (MP3: {info.get('mp3')}, Cover: {info.get('cover')})")
         return True, output_name
     else:
         print(f"  FAIL: Verification failed - {result}")

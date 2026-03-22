@@ -4,6 +4,7 @@
 import unittest
 import sys
 import os
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -12,6 +13,7 @@ from convert import (
     extract_metadata_from_filename,
     extract_handles,
     clean_title_for_search,
+    find_local_cover,
     OG_IMAGE_RE,
     BANDCAMP_URL_RE,
     SNDCLOUD_ARTWORK_RE,
@@ -233,6 +235,79 @@ class TestCoverSearchLogic(unittest.TestCase):
         """Extract handle for SC search."""
         handles = extract_handles("My Song [gsfreedls].wav")
         self.assertIn("gsfreedls", handles)
+
+
+class TestLocalCoverSearch(unittest.TestCase):
+    """Tests for local cover art search."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        for f in Path(self.test_dir).glob('*'):
+            f.unlink()
+        Path(self.test_dir).rmdir()
+
+    def test_cover_png(self):
+        """Find cover.png in same directory."""
+        wav_path = Path(self.test_dir) / "song.wav"
+        cover_path = Path(self.test_dir) / "cover.png"
+        cover_path.touch()
+        wav_path.touch()
+        result = find_local_cover(str(wav_path))
+        self.assertEqual(result, str(cover_path))
+
+    def test_cover_jpg(self):
+        """Find cover.jpg in same directory."""
+        wav_path = Path(self.test_dir) / "song.wav"
+        cover_path = Path(self.test_dir) / "cover.jpg"
+        cover_path.touch()
+        wav_path.touch()
+        result = find_local_cover(str(wav_path))
+        self.assertEqual(result, str(cover_path))
+
+    def test_cover_jpeg(self):
+        """Find cover.jpeg in same directory."""
+        wav_path = Path(self.test_dir) / "song.wav"
+        cover_path = Path(self.test_dir) / "cover.jpeg"
+        cover_path.touch()
+        wav_path.touch()
+        result = find_local_cover(str(wav_path))
+        self.assertEqual(result, str(cover_path))
+
+    def test_basename_match_png(self):
+        """Find cover matching WAV basename."""
+        wav_path = Path(self.test_dir) / "Artist - Title.wav"
+        cover_path = Path(self.test_dir) / "Artist - Title.png"
+        cover_path.touch()
+        wav_path.touch()
+        result = find_local_cover(str(wav_path))
+        self.assertEqual(result, str(cover_path))
+
+    def test_basename_match_jpg(self):
+        """Find cover matching WAV basename with jpg."""
+        wav_path = Path(self.test_dir) / "MySong.wav"
+        cover_path = Path(self.test_dir) / "MySong.jpg"
+        cover_path.touch()
+        wav_path.touch()
+        result = find_local_cover(str(wav_path))
+        self.assertEqual(result, str(cover_path))
+
+    def test_any_image_in_folder(self):
+        """Find any image file when no specific cover found."""
+        wav_path = Path(self.test_dir) / "song.wav"
+        any_image = Path(self.test_dir) / "any_image.png"
+        any_image.touch()
+        wav_path.touch()
+        result = find_local_cover(str(wav_path))
+        self.assertEqual(result, str(any_image))
+
+    def test_no_cover_found(self):
+        """Return None when no cover exists."""
+        wav_path = Path(self.test_dir) / "song.wav"
+        wav_path.touch()
+        result = find_local_cover(str(wav_path))
+        self.assertIsNone(result)
 
 
 class TestEdgeCases(unittest.TestCase):

@@ -1,8 +1,8 @@
-# wav-to-aac-converter
+# wav-to-mp3-converter
 
 ![AI-Powered Audio Conversion](assets/ai-powered.png)
 
-AI-agent driven WAV to AAC conversion with loudness normalization, metadata extraction, and cover art embedding. Designed to be controlled by AI coding assistants like [opencode](https://opencode.ai) or Claude Code.
+AI-agent driven WAV to MP3 conversion with loudness normalization, metadata extraction, and cover art embedding. Designed to be controlled by AI coding assistants like [opencode](https://opencode.ai) or Claude Code.
 
 ## How It Works
 
@@ -17,7 +17,7 @@ The agent handles:
 - File discovery and batch processing decisions
 - Loudness analysis and gain calculation
 - Metadata extraction from files or web search
-- Cover art download from Deezer/Bandcamp/SoundCloud
+- Cover art search: embedded → local folder → Deezer → Bandcamp → SoundCloud
 - Error recovery and retries
 - Verification of output quality
 
@@ -28,21 +28,21 @@ The agent handles:
 Open an AI coding assistant in this directory and prompt:
 
 ```
-Convert all WAV files to AAC using the workflow from AGENTS.md.
+Convert all WAV files to MP3 using the workflow from AGENTS.md.
 ```
 
 Example for opencode:
 ```bash
 opencode
-# Then paste: Convert all WAV files to AAC using the workflow from AGENTS.md.
+# Then paste: Convert all WAV files to MP3 using the workflow from AGENTS.md.
 ```
 
 ### Via Command Line
 
 ```bash
-python convert.py <file.wav>              # Single file
-python convert.py *.wav                   # Batch (auto-parallel for 4+ files)
-python convert.py file1.wav file2.wav    # Multiple files
+python3 convert.py <file.wav>              # Single file
+python3 convert.py *.wav                   # Batch (auto-parallel for 4+ files)
+python3 convert.py file1.wav file2.wav    # Multiple files
 ```
 
 ## Prerequisites
@@ -56,14 +56,20 @@ sudo apt install ffmpeg python3
 
 | Setting | Value |
 |---------|-------|
-| Codec | AAC-LC, 320kbps |
+| Codec | MP3 (libmp3lame), 320kbps |
 | Loudness | True Peak ≤ -0.1 dBTP |
 | Cover Size | 600x600 px |
+
+## Cover Artwork Strategy
+
+1. **Source file**: Extract embedded cover from WAV
+2. **Local folder**: Look for `cover.png`, `cover.jpg`, or matching image files
+3. **Web search**: Deezer → Bandcamp → SoundCloud
 
 ## File Structure
 
 ```
-wav-to-aac-converter/
+wav-to-mp3-converter/
 ├── assets/            # Images and static assets
 ├── AGENTS.md          # AI agent workflow instructions
 ├── README.md          # This file
@@ -71,7 +77,7 @@ wav-to-aac-converter/
 ├── pyproject.toml     # Python project config
 ├── tests/             # Test files
 ├── *.wav              # Source files
-└── *.m4a              # Converted output
+└── *.mp3              # Converted output
 ```
 
 ## For AI Agents
