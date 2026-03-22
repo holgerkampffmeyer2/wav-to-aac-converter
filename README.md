@@ -9,15 +9,17 @@ AI-agent driven WAV to AAC conversion with loudness normalization, metadata extr
 An AI agent reads `AGENTS.md` and executes the conversion workflow:
 
 ```
-AI Agent reads AGENTS.md → Executes convert.py → Monitors results
+AI Agent reads AGENTS.md → Pre-flight Check → Executes convert.py → Monitors results → Verifies output
 ```
 
 The agent handles:
+- Prerequisites check (ffmpeg, python3)
 - File discovery and batch processing decisions
 - Loudness analysis and gain calculation
 - Metadata extraction from files or web search
 - Cover art download from Deezer/Bandcamp/SoundCloud
-- Verification and error handling
+- Error recovery and retries
+- Verification of output quality
 
 ## Usage
 
@@ -36,6 +38,8 @@ opencode
 ```
 
 ### Via Command Line
+
+```bash
 python convert.py <file.wav>              # Single file
 python convert.py *.wav                   # Batch (auto-parallel for 4+ files)
 python convert.py file1.wav file2.wav    # Multiple files
@@ -66,12 +70,16 @@ wav-to-aac-converter/
 ├── pyproject.toml     # Python project config
 ├── tests/             # Test files
 ├── *.wav              # Source files
-└── *.mrma             # Converted output
+└── *.m4a              # Converted output
 ```
 
 ## For AI Agents
 
-See [AGENTS.md](AGENTS.md) for complete workflow instructions that AI assistants will follow.
+See [AGENTS.md](AGENTS.md) for complete workflow instructions including:
+- Pre-flight Check
+- Error Recovery strategies
+- Verification Checklist
+- Batch Processing rules
 
 ## License
 
