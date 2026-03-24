@@ -18,7 +18,7 @@ OUTPUT_FORMAT = 'mp3'
 OG_IMAGE_RE = re.compile(r'"og:image"\s+content="([^"]+)"')
 BANDCAMP_URL_RE = re.compile(r'https?://[^\s"\'<>]*\.bandcamp\.com/(?:track|album)/[^\s"\'<>]*')
 SNDCLOUD_ARTWORK_RE = re.compile(r'https?://i1\.sndcdn\.com/artworks-[\w-]+\.(?:png|jpg)')
-HANDLE_RE = re.compile(r'\[([a-z0-9_]+)\]', re.IGNORECASE)
+HANDLE_RE = re.compile(r'\[([^\]]+)\]', re.IGNORECASE)
 NON_WORD_RE = re.compile(r'[^\w]')
 MULTI_DASH_RE = re.compile(r'-+')
 BRACKET_CLEANUP_RE = re.compile(r'\([^)]*\)|\[[^\]]*\]')
@@ -330,20 +330,116 @@ def search_all_sources(artist, title, filename=""):
 
 
 def extract_metadata_from_filename(filename):
-    """Extract artist and title from filename.
+    """Extract artist and title from filename with improved robustness.
     
     Rules:
-    - First " - " separates Artist from Title
-    - Everything after first " - " is the Title (remix, edit, feat, etc.)
+    - Multiple separators: " - ", " – ", " — ", "_", "." (when not file extension)
+    - First separator splits Artist from Title
+    - Special patterns: "[handle] Title.wav" and "Title [handle].wav" (only for SC-style handles that look like usernames)
+    - Skip leading track numbers: "01 - Artist - Title.wav"
     - No artist info in filename? Return empty artist
     """
     name = Path(filename).stem.strip()
     
-    if ' - ' in name:
-        parts = name.split(' - ', 1)
-        artist = parts[0].strip()
-        title = parts[1].strip()
-        return artist, title
+    # Define descriptive terms that should NOT be treated as artists even if found in brackets
+    descriptive_terms = {
+        'remix', 'edit', 'mix', 'flip', 'rework', 'cover', 'feat', 'ft', 'featuring',
+        'radio', 'clean', 'explicit', 'instrumental', 'acappella', 'dub', 'master',
+        'extended', 'version', 'cut', 'mixshow', 'club', 'original', 'live', 'draft',
+        'preview', 'teaser', 'snippet', 'demo', 'test', 'unmastered', 'unreleased',
+        'wip', 'work in progress', 'flip', 'bootleg', 'vip', 'dbl', 'tb'
+    }
+    
+    # Handle special SoundCloud patterns: [handle] Title or Title [handle]
+    # But only if the handle looks like a username (not just descriptive text)
+    handle_match = re.match(r'\[([^\]]+)\]\s+(.+)', name)
+    if handle_match:
+        potential_artist = handle_match.group(1).strip()
+        title = handle_match.group(2).strip()
+        # Only use handle as artist if it looks like a username and not a descriptive term
+        if (potential_artist and 
+            not potential_artist.isdigit() and 
+            len(potential_artist) >= 2 and
+            potential_artist.lower() not in descriptive_terms and
+            not re.search(r'(?:remix|edit|mix|flip|rework|cover|feat|ft\.|featuring|radio|clean|explicit|instrumental|acappella|dub|master|extended|version|cut|mixshow|club|original|mix|edit|remix|edit)', potential_artist, re.IGNORECASE)):
+            return potential_artist, title
+        # Otherwise fall through to normal separator processing
+    
+    handle_match = re.match(r'(.+)\s+\[([^\]]+)\]', name)
+    if handle_match:
+        title = handle_match.group(1).strip()
+        potential_artist = handle_match.group(2).strip()
+        # Only use handle as artist if it looks like a username and not a descriptive term
+        if (potential_artist and 
+            not potential_artist.isdigit() and 
+            len(potential_artist) >= 2 and
+            potential_artist.lower() not in descriptive_terms and
+            not re.search(r'(?:remix|edit|mix|flip|rework|cover|feat|ft\.|featuring|radio|clean|explicit|instrumental|acappella|dub|master|extended|version|cut|mixshow|club|original|mix|edit|remix|edit)', potential_artist, re.IGNORECASE)):
+            return potential_artist, title
+        # Otherwise fall through to normal separator processing
+    
+    # Handle multiple separator types - but be more careful with underscore and dot
+    # Only treat underscore/dot as separator if it looks like a deliberate separator pattern
+    separators = [' - ', ' – ', ' — ']  # Definite separators (with spaces)
+    flexible_separators = ['_', '.']   # Potential separators (need context check)
+    
+    # Check definite separators first
+    for sep in separators:
+        if sep in name:
+            # Only split on first occurrence
+            parts = name.split(sep, 1)
+            artist = parts[0].strip()
+            title = parts[1].strip()
+            
+            # Check if artist part looks like a track number (digits only or with common suffixes)
+            if re.match(r'^\d+(\s*(st|nd|rd|th))?$', artist):
+                # This looks like a track number, try to get artist from title part
+                # Look for another separator in the title part
+                for sep2 in separators + flexible_separators:
+                    if sep2 in title:
+                        parts2 = title.split(sep2, 1)
+                        artist = parts2[0].strip()
+                        title = parts2[1].strip()
+                        break
+                else:
+                    # No second separator found, treat title part as title only
+                    artist = ''
+                    title = name.strip()
+            return artist, title
+    
+    # Check flexible separators with more context
+    for sep in flexible_separators:
+        if sep in name:
+            # Only treat as separator if surrounded by alphanumerics or common filename chars
+            # This avoids treating "Artist_Title" as separator when it's actually part of a single title
+            parts = name.split(sep, 1)
+            if len(parts) == 2:
+                artist = parts[0].strip()
+                title = parts[1].strip()
+                
+                # Additional validation: both parts should look reasonable
+                # Artist should not be just numbers or descriptive terms
+                # Title should not be empty
+                if (artist and title and 
+                    not re.match(r'^\d+(\s*(st|nd|rd|th))?$', artist) and  # Not just track number
+                    artist.lower() not in descriptive_terms and  # Not descriptive term
+                    len(artist) >= 1):  # Reasonable length
+                    
+                    # Check if artist part looks like a track number
+                    if re.match(r'^\d+(\s*(st|nd|rd|th))?$', artist):
+                        # This looks like a track number, try to get artist from title part
+                        # Look for another separator in the title part
+                        for sep2 in separators + flexible_separators:
+                            if sep2 in title:
+                                parts2 = title.split(sep2, 1)
+                                artist = parts2[0].strip()
+                                title = parts2[1].strip()
+                                break
+                        else:
+                            # No second separator found, treat title part as title only
+                            artist = ''
+                            title = name.strip()
+                    return artist, title
     
     return '', name.strip()
 

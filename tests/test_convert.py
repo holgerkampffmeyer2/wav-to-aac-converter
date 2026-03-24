@@ -112,10 +112,10 @@ class TestHandleExtraction(unittest.TestCase):
         self.assertIn("gsfreedls", handles)
 
     def test_handle_with_dash(self):
-        """Handle with dash - current regex excludes dashes."""
+        """Handle with dash - updated regex now includes dashes."""
         handles = extract_handles("Track [user-name].wav")
         self.assertNotIn("user", handles)
-        self.assertNotIn("user-name", handles)
+        self.assertIn("user-name", handles)
 
 
 class TestTitleCleanup(unittest.TestCase):
