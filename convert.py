@@ -338,6 +338,7 @@ def extract_metadata_from_filename(filename):
     - Special patterns: "[handle] Title.wav" and "Title [handle].wav" (only for SC-style handles that look like usernames)
     - Skip leading track numbers: "01 - Artist - Title.wav"
     - No artist info in filename? Return empty artist
+    - Handle leading bracketed descriptive terms: "[Remix] Title.wav" -> Title only
     """
     name = Path(filename).stem.strip()
     
@@ -350,33 +351,55 @@ def extract_metadata_from_filename(filename):
         'wip', 'work in progress', 'flip', 'bootleg', 'vip', 'dbl', 'tb'
     }
     
-    # Handle special SoundCloud patterns: [handle] Title or Title [handle]
-    # But only if the handle looks like a username (not just descriptive text)
-    handle_match = re.match(r'\[([^\]]+)\]\s+(.+)', name)
-    if handle_match:
-        potential_artist = handle_match.group(1).strip()
-        title = handle_match.group(2).strip()
-        # Only use handle as artist if it looks like a username and not a descriptive term
-        if (potential_artist and 
-            not potential_artist.isdigit() and 
-            len(potential_artist) >= 2 and
-            potential_artist.lower() not in descriptive_terms and
-            not re.search(r'(?:remix|edit|mix|flip|rework|cover|feat|ft\.|featuring|radio|clean|explicit|instrumental|acappella|dub|master|extended|version|cut|mixshow|club|original|mix|edit|remix|edit)', potential_artist, re.IGNORECASE)):
-            return potential_artist, title
-        # Otherwise fall through to normal separator processing
+    # Handle leading bracketed terms that should be ignored
+    # Example: "[Remix] Track Name.wav" -> Artist: "", Title: "Track Name [Remix]"
+    # Example: "[123] Track.wav" -> Artist: "", Title: "Track [123]"
+    leading_bracket_match = re.match(r'\[([^\]]+)\]\s+(.+)', name)
+    if leading_bracket_match:
+        bracket_content = leading_bracket_match.group(1).strip()
+        remaining_title = leading_bracket_match.group(2).strip()
+        # If the bracket content is a descriptive term or numeric-only, treat it as not being an artist handle
+        if (bracket_content.lower() in descriptive_terms or
+            bracket_content.isdigit() or
+            re.search(r'(?:remix|edit|mix|flip|rework|cover|feat|ft\.|featuring|radio|clean|explicit|instrumental|acappella|dub|master|extended|version|cut|mixshow|club|original|mix|edit|remix|edit)', bracket_content, re.IGNORECASE)):
+            # Don't treat as handle, fall through to normal processing
+            pass
+        else:
+            # This looks like a real handle, use it as artist
+            potential_artist = bracket_content
+            title = remaining_title
+            # Only use handle as artist if it looks like a username and not a descriptive term
+            if (potential_artist and 
+                not potential_artist.isdigit() and 
+                len(potential_artist) >= 2 and
+                potential_artist.lower() not in descriptive_terms and
+                not re.search(r'(?:remix|edit|mix|flip|rework|cover|feat|ft\.|featuring|radio|clean|explicit|instrumental|acappella|dub|master|extended|version|cut|mixshow|club|original|mix|edit|remix|edit)', potential_artist, re.IGNORECASE)):
+                return potential_artist, title
+            # Otherwise fall through to normal separator processing
     
-    handle_match = re.match(r'(.+)\s+\[([^\]]+)\]', name)
-    if handle_match:
-        title = handle_match.group(1).strip()
-        potential_artist = handle_match.group(2).strip()
-        # Only use handle as artist if it looks like a username and not a descriptive term
-        if (potential_artist and 
-            not potential_artist.isdigit() and 
-            len(potential_artist) >= 2 and
-            potential_artist.lower() not in descriptive_terms and
-            not re.search(r'(?:remix|edit|mix|flip|rework|cover|feat|ft\.|featuring|radio|clean|explicit|instrumental|acappella|dub|master|extended|version|cut|mixshow|club|original|mix|edit|remix|edit)', potential_artist, re.IGNORECASE)):
-            return potential_artist, title
-        # Otherwise fall through to normal separator processing
+    # Handle trailing bracketed descriptive terms that should be ignored  
+    # Example: "Track Name [Remix].wav" -> Artist: "", Title: "Track Name [Remix]"
+    trailing_bracket_match = re.match(r'(.+)\s+\[([^\]]+)\]', name)
+    if trailing_bracket_match:
+        title_part = trailing_bracket_match.group(1).strip()
+        bracket_content = trailing_bracket_match.group(2).strip()
+        # If the bracket content is a descriptive term, treat it as not being an artist handle
+        if (bracket_content.lower() in descriptive_terms or
+            re.search(r'(?:remix|edit|mix|flip|rework|cover|feat|ft\.|featuring|radio|clean|explicit|instrumental|acappella|dub|master|extended|version|cut|mixshow|club|original|mix|edit|remix|edit)', bracket_content, re.IGNORECASE)):
+            # Don't treat as handle, fall through to normal processing
+            pass
+        else:
+            # This looks like a real handle, use it as artist
+            title = title_part
+            potential_artist = bracket_content
+            # Only use handle as artist if it looks like a username and not a descriptive term
+            if (potential_artist and 
+                not potential_artist.isdigit() and 
+                len(potential_artist) >= 2 and
+                potential_artist.lower() not in descriptive_terms and
+                not re.search(r'(?:remix|edit|mix|flip|rework|cover|feat|ft\.|featuring|radio|clean|explicit|instrumental|acappella|dub|master|extended|version|cut|mixshow|club|original|mix|edit|remix|edit)', potential_artist, re.IGNORECASE)):
+                return potential_artist, title
+            # Otherwise fall through to normal separator processing
     
     # Handle multiple separator types - but be more careful with underscore and dot
     # Only treat underscore/dot as separator if it looks like a deliberate separator pattern
@@ -420,10 +443,20 @@ def extract_metadata_from_filename(filename):
                 # Additional validation: both parts should look reasonable
                 # Artist should not be just numbers or descriptive terms
                 # Title should not be empty
+                # Be more conservative with underscore and dot - require stronger evidence it's a separator
+                # For cases like "ATTRACTION_Demo_G_125", we want to avoid splitting on underscores
+                # when it looks like a single cohesive title
                 if (artist and title and 
                     not re.match(r'^\d+(\s*(st|nd|rd|th))?$', artist) and  # Not just track number
                     artist.lower() not in descriptive_terms and  # Not descriptive term
-                    len(artist) >= 1):  # Reasonable length
+                    len(artist) >= 2 and  # Artist should be at least 2 chars for flexible separators
+                    len(title) >= 2 and   # Title should be at least 2 chars for flexible separators
+                    # Additional heuristic: if both parts contain vowels or are reasonable length, it's more likely a separator
+                    (any(c in 'aeiouAEIOU' for c in artist) or len(artist) >= 3) and
+                    (any(c in 'aeiouAEIOU' for c in title) or len(title) >= 3) and
+                    # Extra restriction: if the artist part is all uppercase and title contains lowercase with underscores,
+                    # it's likely a single title like "ATTRACTION_DEMO_G_125" -> "ATTRACTION_Demo_G_125"
+                    not (artist.isupper() and '_' in title and any(c.islower() for c in title))):
                     
                     # Check if artist part looks like a track number
                     if re.match(r'^\d+(\s*(st|nd|rd|th))?$', artist):
