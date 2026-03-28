@@ -119,3 +119,6 @@ MIT
 - YouTube: [@djhulk_de](https://youtube.com/@djhulk_de)
 - Mixcloud: [holger-kampffmeyer](https://mixcloud.com/holger-kampffmeyer)
 - LinkedIn: [holger-kampffmeyer](https://linkedin.com/in/holger-kampffmeyer-390b6789)
+
+
+**Note**: This tool is designed to be used with AI coding assistants but can also be run manually via the command line.
