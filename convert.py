@@ -98,11 +98,53 @@ def extract_metadata(wav_path):
         return {}
 
 
-def _fetch_url(url, timeout=15):
-    """Fetch URL content with custom headers."""
-    headers = f'-A {USER_AGENT} -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"'
-    cmd = f'curl -sL {headers} --max-time {timeout} "{url}"'
-    success, stdout, _ = run_cmd(cmd, timeout=timeout + 5)
+def fetch_url(url, timeout=15, headers=None, method='GET', data=None):
+    """Fetch URL content with configurable options.
+    
+    Args:
+        url (str): URL to fetch
+        timeout (int): Request timeout in seconds
+        headers (dict): Custom headers to send
+        method (str): HTTP method (GET, POST, etc.)
+        data (dict): Data to send (for POST requests)
+        
+    Returns:
+        str: Response content or empty string on failure
+    """
+    # Default headers
+    default_headers = {
+        'User-Agent': USER_AGENT.strip('"'),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+    }
+    
+    # Merge custom headers with defaults
+    if headers:
+        default_headers.update(headers)
+    
+    # Build curl command
+    curl_cmd = ['curl', '-sL']  # Silent, follow redirects
+    
+    # Add headers
+    for key, value in default_headers.items():
+        curl_cmd.extend(['-H', f'{key}: {value}'])
+    
+    # Add timeout
+    curl_cmd.extend(['--max-time', str(timeout)])
+    
+    # Add method and data if needed
+    if method.upper() == 'POST' and data:
+        curl_cmd.extend(['-X', 'POST'])
+        # Convert dict to form data
+        form_data = []
+        for key, value in data.items():
+            form_data.extend(['-d', f'{key}={value}'])
+        curl_cmd.extend(form_data)
+    
+    # Add URL
+    curl_cmd.append(url)
+    
+    # Execute command
+    success, stdout, _ = run_cmd(' '.join(curl_cmd), timeout=timeout + 5)
     return stdout if success else ""
 
 
@@ -113,7 +155,7 @@ def search_deezer_cover(artist, title):
         return None
     query = f"{artist}+{title}".replace(' ', '+')
     url = f"https://api.deezer.com/search/album?q={query}"
-    content = _fetch_url(url)
+    content = fetch_url(url)
     if not content:
         return None
     try:
@@ -134,7 +176,7 @@ def search_bandcamp_cover(artist, title):
     if not query:
         return None
     search_url = f"https://bandcamp.com/search?q={query.replace(' ', '+')}"
-    content = _fetch_url(search_url)
+    content = fetch_url(search_url)
     if not content:
         return None
     
@@ -143,7 +185,7 @@ def search_bandcamp_cover(artist, title):
         return None
     
     bandcamp_url = match.group(0).split('"')[0].split('&')[0]
-    page_content = _fetch_url(bandcamp_url)
+    page_content = fetch_url(bandcamp_url)
     if page_content:
         img_match = OG_IMAGE_RE.search(page_content)
         if img_match:
@@ -330,16 +372,7 @@ def search_all_sources(artist, title, filename=""):
 
 
 def extract_metadata_from_filename(filename):
-    """Extract artist and title from filename with improved robustness.
-    
-    Rules:
-    - Multiple separators: " - ", " – ", " — ", "_", "." (when not file extension)
-    - First separator splits Artist from Title
-    - Special patterns: "[handle] Title.wav" and "Title [handle].wav" (only for SC-style handles that look like usernames)
-    - Skip leading track numbers: "01 - Artist - Title.wav"
-    - No artist info in filename? Return empty artist
-    - Handle leading bracketed descriptive terms: "[Remix] Title.wav" -> Title only
-    """
+    """Extract artist and title from filename with improved robustness."""
     name = Path(filename).stem.strip()
     
     # Define descriptive terms that should NOT be treated as artists even if found in brackets
@@ -351,73 +384,68 @@ def extract_metadata_from_filename(filename):
         'wip', 'work in progress', 'flip', 'bootleg', 'vip', 'dbl', 'tb'
     }
     
-    # Handle leading bracketed terms that should be ignored
-    # Example: "[Remix] Track Name.wav" -> Artist: "", Title: "Track Name [Remix]"
-    # Example: "[123] Track.wav" -> Artist: "", Title: "Track [123]"
+    # Handle leading bracketed terms
     leading_bracket_match = re.match(r'\[([^\]]+)\]\s+(.+)', name)
     if leading_bracket_match:
         bracket_content = leading_bracket_match.group(1).strip()
         remaining_title = leading_bracket_match.group(2).strip()
-        # If the bracket content is a descriptive term or numeric-only, treat it as not being an artist handle
-        if (bracket_content.lower() in descriptive_terms or
-            bracket_content.isdigit() or
-            re.search(r'(?:remix|edit|mix|flip|rework|cover|feat|ft\.|featuring|radio|clean|explicit|instrumental|acappella|dub|master|extended|version|cut|mixshow|club|original|mix|edit|remix|edit)', bracket_content, re.IGNORECASE)):
-            # Don't treat as handle, fall through to normal processing
-            pass
-        else:
-            # This looks like a real handle, use it as artist
-            potential_artist = bracket_content
-            title = remaining_title
-            # Only use handle as artist if it looks like a username and not a descriptive term
-            if (potential_artist and 
-                not potential_artist.isdigit() and 
-                len(potential_artist) >= 2 and
-                potential_artist.lower() not in descriptive_terms and
-                not re.search(r'(?:remix|edit|mix|flip|rework|cover|feat|ft\.|featuring|radio|clean|explicit|instrumental|acappella|dub|master|extended|version|cut|mixshow|club|original|mix|edit|remix|edit)', potential_artist, re.IGNORECASE)):
-                return potential_artist, title
-            # Otherwise fall through to normal separator processing
+        
+        # Check if bracket content should be treated as artist handle
+        if _is_valid_artist_handle(bracket_content, descriptive_terms):
+            return bracket_content, remaining_title
+        # Otherwise fall through to normal processing
     
-    # Handle trailing bracketed descriptive terms that should be ignored  
-    # Example: "Track Name [Remix].wav" -> Artist: "", Title: "Track Name [Remix]"
+    # Handle trailing bracketed terms
     trailing_bracket_match = re.match(r'(.+)\s+\[([^\]]+)\]', name)
     if trailing_bracket_match:
         title_part = trailing_bracket_match.group(1).strip()
         bracket_content = trailing_bracket_match.group(2).strip()
-        # If the bracket content is a descriptive term, treat it as not being an artist handle
-        if (bracket_content.lower() in descriptive_terms or
-            re.search(r'(?:remix|edit|mix|flip|rework|cover|feat|ft\.|featuring|radio|clean|explicit|instrumental|acappella|dub|master|extended|version|cut|mixshow|club|original|mix|edit|remix|edit)', bracket_content, re.IGNORECASE)):
-            # Don't treat as handle, fall through to normal processing
-            pass
-        else:
-            # This looks like a real handle, use it as artist
-            title = title_part
-            potential_artist = bracket_content
-            # Only use handle as artist if it looks like a username and not a descriptive term
-            if (potential_artist and 
-                not potential_artist.isdigit() and 
-                len(potential_artist) >= 2 and
-                potential_artist.lower() not in descriptive_terms and
-                not re.search(r'(?:remix|edit|mix|flip|rework|cover|feat|ft\.|featuring|radio|clean|explicit|instrumental|acappella|dub|master|extended|version|cut|mixshow|club|original|mix|edit|remix|edit)', potential_artist, re.IGNORECASE)):
-                return potential_artist, title
-            # Otherwise fall through to normal separator processing
-    
-    # Handle multiple separator types - but be more careful with underscore and dot
-    # Only treat underscore/dot as separator if it looks like a deliberate separator pattern
-    separators = [' - ', ' – ', ' — ']  # Definite separators (with spaces)
-    flexible_separators = ['_', '.']   # Potential separators (need context check)
+        
+        # Only treat bracketed content as artist if there's also a separator in the filename
+        # This prevents treating "Track [username].wav" as artist="username", title="Track"
+        has_separator = any(sep in name for sep in [' - ', ' – ', ' — ', '_', '.'])
+        
+        # Check if bracket content should be treated as artist handle
+        if has_separator and _is_valid_artist_handle(bracket_content, descriptive_terms):
+            return bracket_content, title_part
+        # Otherwise fall through to normal processing
+
+    # Handle separators
+    return _parse_separators(name, descriptive_terms)
+
+
+def _is_valid_artist_handle(potential_artist, descriptive_terms):
+    """Check if a string looks like a valid artist handle (not a descriptive term)."""
+    if not potential_artist:
+        return False
+    if potential_artist.isdigit():
+        return False
+    if len(potential_artist) < 2:
+        return False
+    if potential_artist.lower() in descriptive_terms:
+        return False
+    if re.search(r'(?:remix|edit|mix|flip|rework|cover|feat|ft\.|featuring|radio|clean|explicit|instrumental|acappella|dub|master|extended|version|cut|mixshow|club|original|mix|edit|remix|edit)', potential_artist, re.IGNORECASE):
+        return False
+    return True
+
+
+def _parse_separators(name, descriptive_terms):
+    """Parse filename using separator logic."""
+    # Definite separators (with spaces)
+    separators = [' - ', ' – ', ' — ']
+    # Flexible separators (need context check)
+    flexible_separators = ['_', '.']
     
     # Check definite separators first
     for sep in separators:
         if sep in name:
-            # Only split on first occurrence
             parts = name.split(sep, 1)
             artist = parts[0].strip()
             title = parts[1].strip()
             
-            # Check if artist part looks like a track number (digits only or with common suffixes)
-            if re.match(r'^\d+(\s*(st|nd|rd|th))?$', artist):
-                # This looks like a track number, try to get artist from title part
-                # Look for another separator in the title part
+            # Check if artist part looks like a track number
+            if _looks_like_track_number(artist):
+                # Try to get artist from title part
                 for sep2 in separators + flexible_separators:
                     if sep2 in title:
                         parts2 = title.split(sep2, 1)
@@ -433,35 +461,16 @@ def extract_metadata_from_filename(filename):
     # Check flexible separators with more context
     for sep in flexible_separators:
         if sep in name:
-            # Only treat as separator if surrounded by alphanumerics or common filename chars
-            # This avoids treating "Artist_Title" as separator when it's actually part of a single title
             parts = name.split(sep, 1)
             if len(parts) == 2:
                 artist = parts[0].strip()
                 title = parts[1].strip()
                 
-                # Additional validation: both parts should look reasonable
-                # Artist should not be just numbers or descriptive terms
-                # Title should not be empty
-                # Be more conservative with underscore and dot - require stronger evidence it's a separator
-                # For cases like "ATTRACTION_Demo_G_125", we want to avoid splitting on underscores
-                # when it looks like a single cohesive title
-                if (artist and title and 
-                    not re.match(r'^\d+(\s*(st|nd|rd|th))?$', artist) and  # Not just track number
-                    artist.lower() not in descriptive_terms and  # Not descriptive term
-                    len(artist) >= 2 and  # Artist should be at least 2 chars for flexible separators
-                    len(title) >= 2 and   # Title should be at least 2 chars for flexible separators
-                    # Additional heuristic: if both parts contain vowels or are reasonable length, it's more likely a separator
-                    (any(c in 'aeiouAEIOU' for c in artist) or len(artist) >= 3) and
-                    (any(c in 'aeiouAEIOU' for c in title) or len(title) >= 3) and
-                    # Extra restriction: if the artist part is all uppercase and title contains lowercase with underscores,
-                    # it's likely a single title like "ATTRACTION_DEMO_G_125" -> "ATTRACTION_Demo_G_125"
-                    not (artist.isupper() and '_' in title and any(c.islower() for c in title))):
-                    
-                    # Check if artist part looks like a track number
-                    if re.match(r'^\d+(\s*(st|nd|rd|th))?$', artist):
-                        # This looks like a track number, try to get artist from title part
-                        # Look for another separator in the title part
+                # Validate both parts look reasonable
+                if _is_valid_filename_part(artist, descriptive_terms) and _is_valid_filename_part(title, descriptive_terms):
+                    # Additional check for artist being track number
+                    if _looks_like_track_number(artist):
+                        # Try to get artist from title part
                         for sep2 in separators + flexible_separators:
                             if sep2 in title:
                                 parts2 = title.split(sep2, 1)
@@ -475,6 +484,29 @@ def extract_metadata_from_filename(filename):
                     return artist, title
     
     return '', name.strip()
+
+
+def _looks_like_track_number(text):
+    """Check if text looks like a track number."""
+    return bool(re.match(r'^\d+(\s*(st|nd|rd|th))?$', text))
+
+
+def _is_valid_filename_part(text, descriptive_terms):
+    """Check if a filename part looks reasonable (not just numbers or descriptive terms)."""
+    if not text:
+        return False
+    if text.lower() in descriptive_terms:
+        return False
+    if len(text) < 2:
+        return False
+    # Check if it contains vowels or is reasonable length
+    if not (any(c in 'aeiouAEIOU' for c in text) or len(text) >= 3):
+        return False
+    # Extra restriction: if the part is all uppercase and contains lowercase with underscores,
+    # it's likely a single title like "ATTRACTION_DEMO_G_125"
+    if text.isupper() and '_' in text and any(c.islower() for c in text):
+        return False
+    return True
 
 
 def find_local_cover(wav_path):
@@ -522,38 +554,37 @@ def process_cover(cover_path, output_path):
     return success
 
 
-def encode_mp3(wav_path, output_path, metadata, gain_db):
-    """Encode WAV to MP3 with metadata."""
-    cmd = f'ffmpeg -y -i "{wav_path}" -map 0:a -af "volume={gain_db}dB" -c:a libmp3lame -b:a 320k'
+def encode_audio(wav_path, output_path, metadata, gain_db, fmt):
+    """Encode WAV to audio format (MP3 or M4A) with metadata."""
+    if fmt == 'mp3':
+        codec = 'libmp3lame'
+        extra_args = ''
+    elif fmt == 'm4a':
+        codec = 'aac'
+        extra_args = '-movflags +use_metadata_tags'
+    else:
+        raise ValueError(f"Unsupported format: {fmt}")
+    
+    cmd = f'ffmpeg -y -i "{wav_path}" -map 0:a -af "volume={gain_db}dB" -c:a {codec} -b:a 320k'
     for key, value in metadata.items():
         if value and isinstance(value, str):
             cmd += f' -metadata {key}="{value}"'
+    if extra_args:
+        cmd += f' {extra_args}'
     cmd += f' "{output_path}"'
     success, _, stderr = run_cmd(cmd)
     return success
 
 
-def encode_m4a(wav_path, output_path, metadata, gain_db):
-    """Encode WAV to M4A/AAC with metadata."""
-    cmd = f'ffmpeg -y -i "{wav_path}" -map 0:a -af "volume={gain_db}dB" -c:a aac -b:a 320k'
-    for key, value in metadata.items():
-        if value and isinstance(value, str):
-            cmd += f' -metadata {key}="{value}"'
-    cmd += f' -movflags +use_metadata_tags "{output_path}"'
-    success, _, stderr = run_cmd(cmd)
-    return success
-
-
-def embed_cover_mp3(mp3_path, cover_path, final_path):
-    """Embed cover art into MP3 using ffmpeg."""
-    cmd = f'ffmpeg -y -i "{mp3_path}" -i "{cover_path}" -map 0:a -map 1:v -c:a copy -c:v copy -id3v2_version 3 -metadata:s:v title="Album cover" -metadata:s:v mimetype="image/jpeg" "{final_path}"'
-    success, _, _ = run_cmd(cmd)
-    return success
-
-
-def embed_cover_m4a(m4a_path, cover_path, final_path):
-    """Embed cover art into M4A."""
-    cmd = f'ffmpeg -y -i "{m4a_path}" -i "{cover_path}" -c:a copy -c:v copy -map 0:a -map 1:v -disposition:1 attached_pic "{final_path}"'
+def embed_cover(input_path, cover_path, final_path, fmt):
+    """Embed cover art into audio file (MP3 or M4A)."""
+    if fmt == 'mp3':
+        cmd = f'ffmpeg -y -i "{input_path}" -i "{cover_path}" -map 0:a -map 1:v -c:a copy -c:v copy -id3v2_version 3 -metadata:s:v title="Album cover" -metadata:s:v mimetype="image/jpeg" "{final_path}"'
+    elif fmt == 'm4a':
+        cmd = f'ffmpeg -y -i "{input_path}" -i "{cover_path}" -c:a copy -c:v copy -map 0:a -map 1:v -disposition:1 attached_pic "{final_path}"'
+    else:
+        raise ValueError(f"Unsupported format: {fmt}")
+    
     success, _, _ = run_cmd(cmd)
     return success
 
@@ -672,10 +703,7 @@ def convert_file(wav_path, fmt='mp3'):
             else:
                 print(f"  Cover: Not found")
     
-    if fmt == 'mp3':
-        success = encode_mp3(wav_path, temp_output, metadata, gain_db)
-    else:
-        success = encode_m4a(wav_path, temp_output, metadata, gain_db)
+    success = encode_audio(wav_path, temp_output, metadata, gain_db, fmt)
     
     if not success:
         print(f"  FAIL: Encoding failed")
@@ -686,10 +714,7 @@ def convert_file(wav_path, fmt='mp3'):
         return False, None
     
     if cover_path and Path(cover_path).exists():
-        if fmt == 'mp3':
-            embed_success = embed_cover_mp3(temp_output, cover_path, output_name)
-        else:
-            embed_success = embed_cover_m4a(temp_output, cover_path, output_name)
+        embed_success = embed_cover(temp_output, cover_path, output_name, fmt)
         
         if embed_success:
             for f in [temp_output, temp_cover, cover_path]:
