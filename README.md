@@ -16,7 +16,7 @@ The agent handles:
 - Prerequisites check (ffmpeg, python3)
 - File discovery and batch processing decisions
 - Loudness analysis and gain calculation
-- Metadata extraction from files or web search
+- Metadata extraction from files, online lookup (iTunes/MusicBrainz), or web search
 - Cover art search: embedded → local folder → Deezer → Bandcamp → SoundCloud
 - Error recovery and retries
 - Verification of output quality
@@ -32,6 +32,7 @@ Convert all WAV files to MP3 using the workflow from AGENTS.md.
 ```
 
 Or for M4A output:
+
 ```
 Convert all WAV files to M4A using the workflow from AGENTS.md.
 ```
@@ -119,6 +120,5 @@ MIT
 - YouTube: [@djhulk_de](https://youtube.com/@djhulk_de)
 - Mixcloud: [holger-kampffmeyer](https://mixcloud.com/holger-kampffmeyer)
 - LinkedIn: [holger-kampffmeyer](https://linkedin.com/in/holger-kampffmeyer-390b6789)
-
 
 **Note**: This tool is designed to be used with AI coding assistants but can also be run manually via the command line.

@@ -1,6 +1,6 @@
 # Audio Conversion: WAV to MP3/M4A
 
-AI agent workflow for converting WAV files to MP3 or M4A with loudness normalization and metadata. Designed for AI coding assistants like [opencode](https://opencode.ai) or Claude Code.
+AI agent workflow for converting WAV files to MP3 or M4A with loudness normalization, metadata, and cover art. Designed for AI coding assistants like [opencode](https://opencode.ai) or Claude Code.
 
 ## Agent Instructions
 
@@ -54,8 +54,13 @@ python3 convert.py --m4a *.wav             # Batch to M4A
 
 ### Single File (Sequential)
 ```
-Loudness Analysis → Metadata Extraction → Cover Search → Encoding → Embed Artwork → Verify
+Loudness Analysis → Metadata Extraction (tags → online lookup → filename) → Cover Search → Encoding → Embed Artwork → Verify
 ```
+
+### Metadata Extraction Strategy
+1. **WAV tags**: Extract artist/title from embedded metadata via ffprobe
+2. **Online lookup**: If tags missing, query iTunes Search API then MusicBrainz API using the filename (no extension)
+3. **Filename parsing**: Fallback to heuristic parsing of the filename (separators, brackets, etc.)
 
 ### Cover Artwork Strategy
 1. **Source file**: Check for embedded cover in WAV
@@ -77,6 +82,7 @@ Loudness Analysis → Metadata Extraction → Cover Search → Encoding → Embe
 | No cover found | Accept missing cover, continue encoding |
 | Encoding fails | Check WAV file integrity, try with stripped metadata |
 | All sources fail | Create output without cover, log warning |
+| Online metadata lookup fails | Fallback to filename parsing |
 
 ### Verification Checklist
 
@@ -117,7 +123,7 @@ sudo apt install ffmpeg python3
 | No cover found | Check filename has artist/title, local PNG/JPG, or embedded cover |
 | API rate limited | Wait 60s, then retry batch |
 | Loudnorm fails | Verify ffmpeg supports loudnorm filter |
-| Metadata missing | Use "Artist - Title" filename format |
+| Metadata missing | Use "Artist - Title" filename format or ensure online services can find the track |
 | Slow batch processing | Normal for 4+ files (parallel mode active) |
 
 ## Technical Details
@@ -126,3 +132,4 @@ sudo apt install ffmpeg python3
 - **Loudness**: True Peak ≤ -0.1 dBTP (auto-calculated gain)
 - **Cover Sources**: Source → Local folder → Deezer → Bandcamp → SoundCloud
 - **Retry Logic**: 3 attempts with exponential backoff
+- **Metadata Sources**: WAV tags → iTunes → MusicBrainz → filename parsing

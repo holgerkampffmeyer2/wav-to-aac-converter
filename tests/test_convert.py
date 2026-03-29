@@ -5,7 +5,9 @@ import unittest
 import sys
 import os
 import tempfile
+import json
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -18,6 +20,11 @@ from convert import (
     BANDCAMP_URL_RE,
     SNDCLOUD_ARTWORK_RE,
     HANDLE_RE,
+    _lookup_itunes,
+    _lookup_musicbrainz,
+    lookup_online_metadata,
+    run_cmd,
+    convert_file,
 )
 
 
@@ -404,6 +411,213 @@ class TestEdgeCases(unittest.TestCase):
         artist, title = extract_metadata_from_filename('Artist - "Kilo" (Remix).wav')
         self.assertEqual(artist, "Artist")
         self.assertIn("Kilo", title)
+
+
+class TestOnlineMetadataLookup(unittest.TestCase):
+    """Tests for online metadata lookup via iTunes and MusicBrainz."""
+
+    @patch('convert.fetch_url')
+    def test_lookup_itunes_success(self, mock_fetch):
+        """iTunes returns a valid track."""
+        mock_fetch.return_value = json.dumps({
+            "resultCount": 1,
+            "results": [{
+                "trackName": "Test Song",
+                "artistName": "Test Artist"
+            }]
+        })
+        artist, title = _lookup_itunes("Test Song")
+        self.assertEqual(artist, "Test Artist")
+        self.assertEqual(title, "Test Song")
+
+    @patch('convert.fetch_url')
+    def test_lookup_itunes_no_results(self, mock_fetch):
+        """iTunes returns no results."""
+        mock_fetch.return_value = json.dumps({"resultCount": 0})
+        artist, title = _lookup_itunes("Unknown Song")
+        self.assertIsNone(artist)
+        self.assertIsNone(title)
+
+    @patch('convert.fetch_url')
+    def test_lookup_musicbrainz_success(self, mock_fetch):
+        """MusicBrainz returns a valid recording."""
+        mock_fetch.return_value = json.dumps({
+            "recordings": [{
+                "title": "Test Song",
+                "artist-credit": [{"artist": {"name": "Test Artist"}}]
+            }]
+        })
+        artist, title = _lookup_musicbrainz("Test Song")
+        self.assertEqual(artist, "Test Artist")
+        self.assertEqual(title, "Test Song")
+
+    @patch('convert.fetch_url')
+    def test_lookup_musicbrainz_no_results(self, mock_fetch):
+        """MusicBrainz returns no results."""
+        mock_fetch.return_value = json.dumps({"recordings": []})
+        artist, title = _lookup_musicbrainz("Unknown Song")
+        self.assertIsNone(artist)
+        self.assertIsNone(title)
+
+    @patch('convert.fetch_url')
+    def test_lookup_online_metadata_itunes_first(self, mock_fetch):
+        """lookup_online_metadata tries iTunes first."""
+        # iTunes returns a result
+        mock_fetch.return_value = json.dumps({
+            "resultCount": 1,
+            "results": [{
+                "trackName": "iTunes Song",
+                "artistName": "iTunes Artist"
+            }]
+        })
+        artist, title = lookup_online_metadata("iTunes Song")
+        self.assertEqual(artist, "iTunes Artist")
+        self.assertEqual(title, "iTunes Song")
+
+    @patch('convert.fetch_url')
+    def test_lookup_online_metadata_fallback_to_musicbrainz(self, mock_fetch):
+        """If iTunes fails, fallback to MusicBrainz."""
+        # First call (iTunes) returns no results, second call (MusicBrainz) returns a result
+        mock_fetch.side_effect = [
+            json.dumps({"resultCount": 0}),  # iTunes
+            json.dumps({  # MusicBrainz
+                "recordings": [{
+                    "title": "MB Song",
+                    "artist-credit": [{"artist": {"name": "MB Artist"}}]
+                }]
+            })
+        ]
+        artist, title = lookup_online_metadata("MB Song")
+        self.assertEqual(artist, "MB Artist")
+        self.assertEqual(title, "MB Song")
+
+    @patch('convert.fetch_url')
+    def test_lookup_online_metadata_both_fail(self, mock_fetch):
+        """Both iTunes and MusicBrainz fail."""
+        mock_fetch.return_value = json.dumps({"resultCount": 0})
+        artist, title = lookup_online_metadata("Unknown Song")
+        self.assertIsNone(artist)
+        self.assertIsNone(title)
+
+
+class TestIntegration(unittest.TestCase):
+    """Integration tests for the conversion process."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.wav_path = os.path.join(self.test_dir, "test.wav")
+        # Create a silent WAV file (1 second, 44100 Hz, 16-bit mono)
+        import struct
+        sample_rate = 44100
+        duration = 1  # second
+        num_samples = sample_rate * duration
+        bytes_per_sample = 2  # 16-bit
+        num_channels = 1
+        byte_rate = sample_rate * num_channels * bytes_per_sample
+        block_align = num_channels * bytes_per_sample
+        data_size = num_samples * num_channels * bytes_per_sample
+        chunk_size = 36 + data_size
+
+        with open(self.wav_path, 'wb') as f:
+            f.write(b'RIFF')  # ChunkID
+            f.write(struct.pack('<I', chunk_size))  # ChunkSize
+            f.write(b'WAVE')  # Format
+            f.write(b'fmt ')  # Subchunk1ID
+            f.write(struct.pack('<I', 16))  # Subchunk1Size (16 for PCM)
+            f.write(struct.pack('<H', 1))   # AudioFormat (1 for PCM)
+            f.write(struct.pack('<H', num_channels))  # NumChannels
+            f.write(struct.pack('<I', sample_rate))  # SampleRate
+            f.write(struct.pack('<I', byte_rate))  # ByteRate
+            f.write(struct.pack('<H', block_align))  # BlockAlign
+            f.write(struct.pack('<H', bytes_per_sample * 8))  # BitsPerSample
+            f.write(b'data')  # Subchunk2ID
+            f.write(struct.pack('<I', data_size))  # Subchunk2Size
+            # Write silent data (all zeros)
+            f.write(b'\x00' * data_size)
+
+    def tearDown(self):
+        # Clean up the temporary directory
+        import shutil
+        shutil.rmtree(self.test_dir)
+
+    @patch('convert.fetch_url')
+    @patch('convert.analyze_loudness')
+    def test_integration_conversion_with_mocked_online(self, mock_loudness, mock_fetch):
+        # Mock loudness analysis to return a fixed dict
+        mock_loudness.return_value = {
+            'input_i': -16.0,
+            'input_tp': -1.0,
+            'input_lra': 8.0,
+            'input_thresh': -24.0
+        }
+
+        # Mock fetch_url for online metadata lookup (iTunes) to return a known track
+        mock_fetch.return_value = json.dumps({
+            "resultCount": 1,
+            "results": [{
+                "trackName": "Test Song",
+                "artistName": "Test Artist",
+                "collectionName": "Test Album"
+            }]
+        })
+
+        # We also need to mock the cover art search to avoid network calls and return None (no cover)
+        # We can do this by patching the specific cover search functions.
+        with patch('convert.search_deezer_cover', return_value=None), \
+             patch('convert.search_bandcamp_cover', return_value=None), \
+             patch('convert.search_soundcloud_web', return_value=(None, None)):
+
+            # Run the conversion
+            success, output_file = convert_file(self.wav_path, fmt='mp3')
+
+            # Check that the conversion succeeded
+            self.assertTrue(success, "Conversion should succeed")
+            self.assertIsNotNone(output_file, "Output file should be returned")
+            self.assertTrue(os.path.exists(output_file), "Output file should exist")
+
+            # Check the output file's metadata using ffprobe
+            cmd = f'ffprobe -v quiet -print_format json -show_format -show_streams "{output_file}"'
+            success_cmd, stdout, _ = run_cmd(cmd)
+            self.assertTrue(success_cmd, "ffprobe should succeed")
+            data = json.loads(stdout)
+            tags = data.get('format', {}).get('tags', {})
+            self.assertEqual(tags.get('artist'), 'Test Artist')
+            self.assertEqual(tags.get('title'), 'Test Song')
+
+    @patch('convert.fetch_url')
+    @patch('convert.analyze_loudness')
+    def test_integration_conversion_m4a_with_mocked_online(self, mock_loudness, mock_fetch):
+        mock_loudness.return_value = {
+            'input_i': -16.0,
+            'input_tp': -1.0,
+            'input_lra': 8.0,
+            'input_thresh': -24.0
+        }
+        mock_fetch.return_value = json.dumps({
+            "resultCount": 1,
+            "results": [{
+                "trackName": "Test Song M4A",
+                "artistName": "Test Artist M4A",
+                "collectionName": "Test Album"
+            }]
+        })
+
+        with patch('convert.search_deezer_cover', return_value=None), \
+             patch('convert.search_bandcamp_cover', return_value=None), \
+             patch('convert.search_soundcloud_web', return_value=(None, None)):
+
+            success, output_file = convert_file(self.wav_path, fmt='m4a')
+            self.assertTrue(success)
+            self.assertIsNotNone(output_file)
+            self.assertTrue(os.path.exists(output_file))
+
+            cmd = f'ffprobe -v quiet -print_format json -show_format -show_streams "{output_file}"'
+            success_cmd, stdout, _ = run_cmd(cmd)
+            self.assertTrue(success_cmd)
+            data = json.loads(stdout)
+            tags = data.get('format', {}).get('tags', {})
+            self.assertEqual(tags.get('artist'), 'Test Artist M4A')
+            self.assertEqual(tags.get('title'), 'Test Song M4A')
 
 
 if __name__ == '__main__':
