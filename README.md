@@ -28,7 +28,6 @@ The converter can be configured using a `config.json` file in the same directory
 ### Default config.json:
 ```json
 {
-  "ascii_filename": false,
   "output_format": "mp3",
   "max_parallel_processes": 5,
   "loudnorm": true,
@@ -39,13 +38,14 @@ The converter can be configured using a `config.json` file in the same directory
 ```
 
 ### Configuration Options:
-- `ascii_filename`: Convert Unicode filenames to ASCII (default: false)
 - `output_format`: Output format - "mp3" or "m4a" (default: mp3)
 - `max_parallel_processes`: Maximum parallel processes (default: 5)
 - `loudnorm`: Enable loudness normalization (default: true)
 - `embed_cover`: Embed cover art (default: true)
 - `retry_attempts`: Retry attempts for failed operations (default: 3)
 - `timeout_seconds`: Timeout in seconds for operations (default: 30)
+
+Note: Unicode filename to ASCII conversion is now automatic and always applied to ensure compatibility with audio processing tools.
 
 ## Usage
 
@@ -84,48 +84,27 @@ python3 convert.py --m4a *.wav            # Batch to M4A
 python3 convert.py --format m4a file.wav
 ```
 
-### Advanced Options:
-```bash
-# Convert Unicode filenames to ASCII
-python3 convert.py --ascii-filename "Грег Эленис - Αγάπης Ti Fotiá.wav"
+## Unicode Filename Handling
 
-# Set maximum parallel workers
-python3 convert.py --max-workers 3 *.wav
+The converter automatically handles Unicode filenames by converting them to ASCII equivalents for processing. This ensures compatibility with audio processing tools like ffmpeg that may not handle Unicode filenames correctly. The conversion happens transparently:
 
-# Disable loudness normalization
-python3 convert.py --no-loudnorm *.wav
-
-# Disable cover art embedding
-python3 convert.py --no-cover *.wav
-
-# Set custom timeout and retry attempts
-python3 convert.py --timeout 60 --retry-attempts 5 *.wav
-
-# Combine options
-python3 convert.py --ascii-filename --m4a --max-workers 3 "Грег Эленис - Αγάπης Ti Fotiá.wav"
-```
-
-## How ASCII Filename Conversion Works
-
-When `--ascii-filename` is enabled:
-1. The script converts Unicode characters in filenames to ASCII equivalents (e.g., "Agapás" → "Agapas")
-2. The WAV file is copied to a temporary directory with the ASCII filename
-3. Processing occurs on the ASCII filename copy
-4. Output files use the ASCII filename (with appropriate extension)
-5. Temporary files are cleaned up after processing
+1. Unicode characters in filenames are converted to ASCII equivalents (e.g., "Agapás" → "Agapas")
+2. Processing occurs on the ASCII filename copy in a temporary directory
+3. Output files use the ASCII filename (with appropriate extension)
+4. Temporary files are cleaned up after processing
 
 This avoids issues with ffmpeg and other tools that may not handle Unicode filenames correctly.
 
 ## Examples
 
-Convert a single file with Unicode characters to MP3 with ASCII filename:
+Convert a single file with Unicode characters to MP3:
 ```bash
-python3 convert.py --ascii-filename "Грег Эленис - Αγάπης Ti Fotiá.wav"
+python3 convert.py "Грег Эленис - Αγάπης Ti Fotiá.wav"
 ```
 
-Convert all WAV files in directory to M4A with ASCII filenames:
+Convert all WAV files in directory to M4A:
 ```bash
-python3 convert.py --ascii-filename --m4a *.wav
+python3 convert.py --m4a *.wav
 ```
 
 Convert with custom parallel processing and disabled cover art:

@@ -1160,35 +1160,40 @@ def save_result_json(wav_path, metadata, loudness, output_name, success, has_cov
         json.dump(result, f, indent=2)
 
 
-def convert_file(wav_path, fmt='mp3', ascii_filename=False):
+def convert_file(wav_path, fmt='mp3'):
     """Convert a single WAV file to MP3 or M4A."""
-    # Handle ASCII filename conversion if requested
+    # Always create ASCII filename copy in temporary directory to avoid ffmpeg issues with Unicode
     original_wav_path = wav_path
     temp_dir = None
-    if ascii_filename:
+    try:
         path_obj = Path(wav_path)
         ascii_stem = to_ascii_filename(path_obj.stem)
-        if ascii_stem and ascii_stem != path_obj.stem:
-            # Create ASCII filename in temporary directory to avoid ffmpeg issues
+        # Always use ASCII filename for processing to avoid Unicode issues with ffmpeg/ffprobe
+        if ascii_stem:
+            # Create ASCII filename in temporary directory
             import tempfile
             temp_dir = tempfile.mkdtemp(prefix='wav2aac_')
             ascii_filename_path = Path(temp_dir) / (ascii_stem + path_obj.suffix)
             # Copy file to temporary location with ASCII name
-            try:
-                import shutil
-                shutil.copy2(original_wav_path, ascii_filename_path)
-                wav_path = str(ascii_filename_path)
+            import shutil
+            shutil.copy2(original_wav_path, ascii_filename_path)
+            wav_path = str(ascii_filename_path)
+            if ascii_stem != path_obj.stem:
                 print(f"  Using ASCII filename: {ascii_filename_path.name}")
-            except Exception as e:
-                print(f"  Warning: Could not create ASCII filename: {e}")
-                # Clean up temp directory on failure
-                if temp_dir and Path(temp_dir).exists():
-                    shutil.rmtree(temp_dir, ignore_errors=True)
-                temp_dir = None
+            else:
+                print(f"  Using filename: {ascii_filename_path.name} (already ASCII)")
         else:
-            wav_path = str(path_obj)  # Keep original if conversion didn't change anything
-    
-    print(f"Processing: {Path(wav_path).name if wav_path else 'Unknown'} -> {fmt.upper()}")
+            # Fallback to original filename if ASCII conversion results in empty string
+            wav_path = str(path_obj)
+            print(f"  Using filename: {Path(wav_path).name}")
+    except Exception as e:
+        print(f"  Warning: Could not create ASCII filename: {e}")
+        # Fall back to original path
+        wav_path = str(original_wav_path)
+        # Clean up temp directory on failure
+        if temp_dir and Path(temp_dir).exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        temp_dir = None
     
     wav_path = str(wav_path)
     base_name = Path(wav_path).stem
@@ -1410,16 +1415,12 @@ def lookup_online_metadata(base_name: str):
 
 def _convert_file_wrapper(args):
     """Wrapper for parallel processing."""
-    if len(args) == 3:
-        wav_path, fmt, ascii_filename = args
-        success, output = convert_file(wav_path, fmt, ascii_filename)
-    else:
-        wav_path, fmt = args
-        success, output = convert_file(wav_path, fmt)
+    wav_path, fmt = args
+    success, output = convert_file(wav_path, fmt)
     return (wav_path, success, output)
 
 
-def convert_batch(file_paths, fmt='mp3', parallel=True, max_workers=5, ascii_filename=False):
+def convert_batch(file_paths, fmt='mp3', parallel=True, max_workers=5):
     """Convert multiple WAV files.
     
     Args:
@@ -1427,7 +1428,6 @@ def convert_batch(file_paths, fmt='mp3', parallel=True, max_workers=5, ascii_fil
         fmt: Output format ('mp3' or 'm4a')
         parallel: Use parallel processing (default: True)
         max_workers: Max parallel processes (default: 5)
-        ascii_filename: Convert Unicode filenames to ASCII (default: False)
     
     Returns:
         List of (wav_path, success, output) tuples
@@ -1436,13 +1436,13 @@ def convert_batch(file_paths, fmt='mp3', parallel=True, max_workers=5, ascii_fil
     
     if not parallel or len(file_paths) < 4:
         for wav_path in file_paths:
-            results.append(_convert_file_wrapper((wav_path, fmt, ascii_filename)))
+            results.append(_convert_file_wrapper((wav_path, fmt)))
         return results
     
     print(f"Converting {len(file_paths)} files in parallel (max {max_workers} workers)...")
     
     with ProcessPoolExecutor(max_workers=min(max_workers, len(file_paths))) as executor:
-        futures = {executor.submit(_convert_file_wrapper, (fp, fmt, ascii_filename)): fp for fp in file_paths}
+        futures = {executor.submit(_convert_file_wrapper, (fp, fmt)): fp for fp in file_paths}
         for future in as_completed(futures):
             results.append(future.result())
     
@@ -1471,9 +1471,6 @@ Examples:
     format_group.add_argument('--m4a', action='store_true', help='Output M4A/AAC format')
     parser.add_argument('--format', choices=['mp3', 'm4a'], default=config['output_format'],
                        help='Output format (default: mp3)')
-    parser.add_argument('--ascii-filename', action='store_true', 
-                       default=config['ascii_filename'],
-                       help='Convert Unicode filenames to ASCII (default: false)')
     parser.add_argument('--max-workers', type=int, default=config['max_parallel_processes'],
                        help=f'Max parallel processes (default: {config["max_parallel_processes"]})')
     parser.add_argument('--no-loudnorm', action='store_false', dest='loudnorm',
@@ -1507,10 +1504,10 @@ if __name__ == '__main__':
     print(f"Output format: {fmt.upper()}")
     
     if len(wav_files) == 1:
-        success, output = convert_file(wav_files[0], fmt, ascii_filename=args.ascii_filename)
+        success, output = convert_file(wav_files[0], fmt)
         sys.exit(0 if success else 1)
     
-    results = convert_batch(wav_files, fmt, parallel=(len(wav_files) >= 4), max_workers=args.max_workers, ascii_filename=args.ascii_filename)
+    results = convert_batch(wav_files, fmt, parallel=(len(wav_files) >= 4), max_workers=args.max_workers)
     
     success_count = sum(1 for _, s, _ in results if s)
     print(f"\nBatch complete: {success_count}/{len(results)} succeeded")

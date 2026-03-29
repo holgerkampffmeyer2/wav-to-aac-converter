@@ -456,6 +456,155 @@ class TestASCIIConversion(unittest.TestCase):
         self.assertEqual(to_ascii_filename(""), "")
 
 
+class TestASCIIFilenameHandling(unittest.TestCase):
+    """Tests for automatic ASCII filename handling in conversion process."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.test_dir = tempfile.mkdtemp()
+        self.original_wav_path = None
+
+    def tearDown(self):
+        """Clean up test fixtures."""
+        # Clean up the temporary directory
+        import shutil
+        if self.test_dir and os.path.exists(self.test_dir):
+            shutil.rmtree(self.test_dir)
+        # Clean up any created WAV files
+        if self.original_wav_path and os.path.exists(self.original_wav_path):
+            os.remove(self.original_wav_path)
+
+    def _create_test_wav(self, filename):
+        """Create a simple silent WAV file for testing."""
+        import struct
+        sample_rate = 44100
+        duration = 0.1  # short duration for quick test
+        num_samples = int(sample_rate * duration)
+        bytes_per_sample = 2  # 16-bit
+        num_channels = 2  # stereo
+        byte_rate = sample_rate * num_channels * bytes_per_sample
+        block_align = num_channels * bytes_per_sample
+        data_size = num_samples * num_channels * bytes_per_sample
+        chunk_size = 36 + data_size
+
+        wav_data = b'RIFF' + struct.pack('<I', chunk_size) + b'WAVE' + b'fmt ' + struct.pack('<I', 16) + struct.pack('<H', 1) + struct.pack('<H', num_channels) + struct.pack('<I', sample_rate) + struct.pack('<I', byte_rate) + struct.pack('<H', block_align) + struct.pack('<H', bytes_per_sample * 8) + b'data' + struct.pack('<I', data_size) + b'\x00' * data_size
+        
+        wav_path = Path(self.test_dir) / filename
+        with open(wav_path, 'wb') as f:
+            f.write(wav_data)
+        self.original_wav_path = str(wav_path)
+        return str(wav_path)
+
+    @patch('convert.analyze_loudness')
+    @patch('convert.extract_metadata')
+    @patch('convert.search_deezer_cover')
+    @patch('convert.search_bandcamp_cover')
+    @patch('convert.search_soundcloud_web')
+    @patch('convert.download_cover')
+    @patch('convert.encode_audio')
+    @patch('convert.embed_cover')
+    @patch('convert.verify_output')
+    @patch('shutil.rmtree')  # Don't actually delete temp dirs in test
+    def test_ascii_filename_used_for_unicode_input(self, mock_rmtree, mock_verify, mock_embed, mock_encode, mock_download, mock_soundcloud, mock_bandcamp, mock_deezer, mock_extract, mock_loudness):
+        """Test that ASCII filename is used when input has Unicode characters."""
+        # Set up mocks to return successful results
+        mock_loudness.return_value = {'input_i': '-9.00', 'input_tp': '1.01'}
+        mock_extract.return_value = {'artist': 'Test Artist', 'title': 'Test Title'}
+        mock_deezer.return_value = None
+        mock_bandcamp.return_value = None
+        mock_soundcloud.return_value = (None, None)
+        mock_download.return_value = True
+        
+        # Make encode_audio return True and also create the temp output file
+        def mock_encode_func(wav_path, temp_output, metadata, gain_db, fmt):
+            # Create the temp output file to simulate successful encoding
+            with open(temp_output, 'wb') as f:
+                f.write(b'dummy mp3 data')
+            return True
+        
+        mock_encode.side_effect = mock_encode_func
+        mock_embed.return_value = True
+        mock_verify.return_value = (True, {'mp3': True, 'cover': False})
+        
+        # Create a WAV file with Unicode characters
+        unicode_filename = 'Tést - CAFÉ.wav'
+        wav_path = self._create_test_wav(unicode_filename)
+        
+        # Call convert_file
+        from convert import convert_file
+        success, output = convert_file(wav_path, fmt='mp3')
+        
+        # Verify the function returned success
+        self.assertTrue(success)
+        self.assertIsNotNone(output)
+        
+        # Verify that encode_audio was called with an ASCII filename path
+        # encode_audio is called with (wav_path, temp_output, metadata, gain_db, fmt)
+        self.assertTrue(mock_encode.called)
+        call_args = mock_encode.call_args[0]  # Get positional arguments
+        wav_path_used_in_encode = call_args[0]  # First argument is wav_path
+        
+        # Verify the WAV path used in encoding is an ASCII version in temp directory
+        self.assertTrue(wav_path_used_in_encode.endswith('.wav'))
+        self.assertIn('wav2aac_', wav_path_used_in_encode)  # Should be in temp directory
+        # The ASCII conversion of "Tést - CAFÉ" is "Test - CAFE"
+        self.assertIn('Test - CAFE.wav', wav_path_used_in_encode)
+
+    @patch('convert.convert_file')
+    def test_ascii_filename_not_needed_for_ascii_input(self, mock_convert):
+        """Test that original filename is used when input is already ASCII."""
+        mock_convert.return_value = (True, 'output.mp3')
+        
+        # Create a WAV file with ASCII characters only
+        ascii_filename = 'Test - Cafe.wav'
+        wav_path = self._create_test_wav(ascii_filename)
+        
+        # Call convert_file
+        from convert import convert_file
+        success, output = convert_file(wav_path, fmt='mp3')
+        
+        # Verify convert_file was called
+        self.assertTrue(mock_convert.called)
+        # Get the arguments passed to convert_file
+        call_args = mock_convert.call_args[0]
+        self.assertEqual(len(call_args), 1)  # wav_path only (fmt is default)
+        wav_path_used = call_args[0]
+        
+        # Verify the WAV path used is the original (since it's already ASCII)
+        self.assertEqual(wav_path_used, wav_path)
+        
+        # Verify the function returned success
+        self.assertTrue(success)
+
+    @patch('convert.convert_file')
+    def test_fallback_to_original_on_ascii_conversion_failure(self, mock_convert):
+        """Test that original filename is used if ASCII conversion fails."""
+        mock_convert.return_value = (True, 'output.mp3')
+        
+        # Create a WAV file with ASCII characters only
+        ascii_filename = 'Test - Cafe.wav'
+        wav_path = self._create_test_wav(ascii_filename)
+        
+        # Mock to_ascii_filename to raise an exception
+        with patch('convert.to_ascii_filename', side_effect=Exception("Test exception")):
+            # Call convert_file
+            from convert import convert_file
+            success, output = convert_file(wav_path, fmt='mp3')
+            
+            # Verify convert_file was called
+            self.assertTrue(mock_convert.called)
+            # Get the arguments passed to convert_file
+            call_args = mock_convert.call_args[0]
+            self.assertEqual(len(call_args), 1)  # wav_path only (fmt is default)
+            wav_path_used = call_args[0]
+            
+            # Verify the WAV path used is the original (fallback)
+            self.assertEqual(wav_path_used, wav_path)
+            
+            # Verify the function returned success
+            self.assertTrue(success)
+
+
 class TestConfigFeatures(unittest.TestCase):
     """Tests for configuration features."""
 
@@ -479,7 +628,7 @@ class TestConfigFeatures(unittest.TestCase):
                 
                 config = load_config()
                 expected = {
-                    "ascii_filename": False,
+                    "ascii_filename": False,  # Kept for backward compatibility but unused
                     "output_format": "mp3",
                     "max_parallel_processes": 5,
                     "loudnorm": True,
@@ -499,7 +648,7 @@ class TestConfigFeatures(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = os.path.join(tmpdir, 'config.json')
             test_config = {
-                "ascii_filename": True,
+                "ascii_filename": True,  # Kept for backward compatibility but unused
                 "output_format": "m4a",
                 "max_parallel_processes": 10,
                 "loudnorm": False,
@@ -532,7 +681,7 @@ class TestConfigFeatures(unittest.TestCase):
             with patch('sys.argv', ['convert.py'] + test_args):
                 args = parse_args()
                 self.assertEqual(args.format, test_config['output_format'])
-                self.assertEqual(args.ascii_filename, test_config['ascii_filename'])
+                # ascii_filename arg removed, so skip this check
                 self.assertEqual(args.max_workers, test_config['max_parallel_processes'])
                 self.assertEqual(args.loudnorm, test_config['loudnorm'])
                 self.assertEqual(args.embed_cover, test_config['embed_cover'])
@@ -550,8 +699,7 @@ class TestConfigFeatures(unittest.TestCase):
         with patch('convert.load_config', return_value=test_config):
             # Test command line overrides
             test_args = [
-                '--m4a',  # Should override output_format
-                '--ascii-filename',  # Should override ascii_filename
+                '--m4a',  # Should set m4a flag to True
                 '--max-workers', '3',  # Should override max_parallel_processes
                 '--no-loudnorm',  # Should override loudnorm (False)
                 '--no-cover',  # Should override embed_cover (False)
@@ -561,8 +709,7 @@ class TestConfigFeatures(unittest.TestCase):
             ]
             with patch('sys.argv', ['convert.py'] + test_args):
                 args = parse_args()
-                self.assertEqual(args.format, 'm4a')  # Command line override
-                self.assertTrue(args.ascii_filename)  # Command line override
+                self.assertTrue(args.m4a)  # Command line override for m4a
                 self.assertEqual(args.max_workers, 3)  # Command line override
                 self.assertFalse(args.loudnorm)  # Command line override
                 self.assertFalse(args.embed_cover)  # Command line override
@@ -570,7 +717,7 @@ class TestConfigFeatures(unittest.TestCase):
                 self.assertEqual(args.timeout, 120)  # Command line override
 
     def test_convert_batch_ascii_filename_param(self):
-        """Test that convert_batch accepts and passes ascii_filename parameter."""
+        """Test that convert_batch works without ascii_filename parameter (removed)."""
         from convert import convert_batch, _convert_file_wrapper
         from unittest.mock import patch
         
@@ -579,20 +726,19 @@ class TestConfigFeatures(unittest.TestCase):
         # and then returns (wav_path, success, output)
         with patch('convert.convert_file', return_value=(True, 'output.wav')) as mock_convert:
             file_paths = ['file1.wav', 'file2.wav']
-            # Test with ascii_filename=False
-            results = convert_batch(file_paths, 'mp3', True, 2, False)
-            # Check that convert_file was called with ascii_filename=False
-            mock_convert.assert_any_call('file1.wav', 'mp3', False)
-            mock_convert.assert_any_call('file2.wav', 'mp3', False)
+            # Test that convert_batch works without ascii_filename parameter
+            results = convert_batch(file_paths, 'mp3', True, 2)
+            # Check that convert_file was called for each file
+            mock_convert.assert_any_call('file1.wav', 'mp3')
+            mock_convert.assert_any_call('file2.wav', 'mp3')
             
             # Reset mock
             mock_convert.reset_mock()
             
-            # Test with ascii_filename=True
-            results = convert_batch(file_paths, 'mp3', True, 2, True)
-            # Check that convert_file was called with ascii_filename=True
-            mock_convert.assert_any_call('file1.wav', 'mp3', True)
-            mock_convert.assert_any_call('file2.wav', 'mp3', True)
+            # Test with parallel=False
+            results = convert_batch(file_paths, 'mp3', False, 2)
+            mock_convert.assert_any_call('file1.wav', 'mp3')
+            mock_convert.assert_any_call('file2.wav', 'mp3')
 
 
 class TestOnlineMetadataLookup(unittest.TestCase):

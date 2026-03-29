@@ -62,6 +62,8 @@ Loudness Analysis → Metadata Extraction (tags → online lookup → filename) 
 2. **Online lookup**: If tags missing, query iTunes Search API then MusicBrainz API using the filename (no extension)
 3. **Filename parsing**: Fallback to heuristic parsing of the filename (separators, brackets, etc.)
 
+Note: Filename processing uses ASCII-converted versions to ensure compatibility with audio processing tools.
+
 ### Cover Artwork Strategy
 1. **Source file**: Check for embedded cover in WAV
 2. **Local folder**: Look for `cover.png`, `cover.jpg`, or matching image files
