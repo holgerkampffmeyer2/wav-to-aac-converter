@@ -7,7 +7,7 @@ import os
 import tempfile
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -411,6 +411,188 @@ class TestEdgeCases(unittest.TestCase):
         artist, title = extract_metadata_from_filename('Artist - "Kilo" (Remix).wav')
         self.assertEqual(artist, "Artist")
         self.assertIn("Kilo", title)
+
+
+class TestASCIIConversion(unittest.TestCase):
+    """Tests for ASCII filename conversion."""
+
+    def test_to_ascii_basic(self):
+        """Test basic ASCII conversion."""
+        from convert import to_ascii_filename
+        self.assertEqual(to_ascii_filename("Artist - Title.wav"), "Artist - Title.wav")
+
+    def test_to_ascii_with_accents(self):
+        """Test conversion of accented characters."""
+        from convert import to_ascii_filename
+        self.assertEqual(to_ascii_filename("Agapás.wav"), "Agapas.wav")
+        self.assertEqual(to_ascii_filename("Café.wav"), "Cafe.wav")
+        self.assertEqual(to_ascii_filename("Naïve.wav"), "Naive.wav")
+
+    def test_to_ascii_special_chars(self):
+        """Test removal of special characters."""
+        from convert import to_ascii_filename
+        # The regex preserves brackets, so [Title] stays as [Title]
+        self.assertEqual(to_ascii_filename("Artist [Title].wav"), "Artist [Title].wav")
+        self.assertEqual(to_ascii_filename("Artist-Title.wav"), "Artist-Title.wav")
+        self.assertEqual(to_ascii_filename("Artist_Title.wav"), "Artist_Title.wav")
+        # Test actual special character removal
+        self.assertEqual(to_ascii_filename("Artist@#$%Title.wav"), "ArtistTitle.wav")
+
+    def test_to_ascii_whitespace(self):
+        """Test whitespace normalization."""
+        from convert import to_ascii_filename
+        self.assertEqual(to_ascii_filename("Artist   -   Title.wav"), "Artist - Title.wav")
+        self.assertEqual(to_ascii_filename("  Artist - Title  .wav"), "Artist - Title .wav")
+
+    def test_to_ascii_non_ascii_only(self):
+        """Test string with only non-ASCII characters."""
+        from convert import to_ascii_filename
+        self.assertEqual(to_ascii_filename("АБВГД.wav"), ".wav")  # Cyrillic becomes empty
+        self.assertEqual(to_ascii_filename("中文测试.wav"), ".wav")  # Chinese becomes empty
+
+    def test_to_ascii_empty_string(self):
+        """Test empty string."""
+        from convert import to_ascii_filename
+        self.assertEqual(to_ascii_filename(""), "")
+
+
+class TestConfigFeatures(unittest.TestCase):
+    """Tests for configuration features."""
+
+    def test_load_config_defaults(self):
+        """Test loading config with default values when file doesn't exist."""
+        from convert import load_config
+        import tempfile
+        import os
+        
+        # Create a temporary directory and ensure config.json doesn't exist
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = os.path.join(tmpdir, 'config.json')
+            if os.path.exists(config_path):
+                os.remove(config_path)
+            
+            # Mock the config file path to point to our temp directory
+            with patch('convert.Path') as mock_path:
+                mock_instance = MagicMock()
+                mock_instance.parent.__truediv__.return_value = Path(config_path)
+                mock_path.return_value = mock_instance
+                
+                config = load_config()
+                expected = {
+                    "ascii_filename": False,
+                    "output_format": "mp3",
+                    "max_parallel_processes": 5,
+                    "loudnorm": True,
+                    "embed_cover": True,
+                    "retry_attempts": 3,
+                    "timeout_seconds": 30
+                }
+                self.assertEqual(config, expected)
+
+    def test_load_config_from_file(self):
+        """Test loading config from an existing file."""
+        from convert import load_config
+        import tempfile
+        import json
+        import os
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = os.path.join(tmpdir, 'config.json')
+            test_config = {
+                "ascii_filename": True,
+                "output_format": "m4a",
+                "max_parallel_processes": 10,
+                "loudnorm": False,
+                "embed_cover": False,
+                "retry_attempts": 5,
+                "timeout_seconds": 60
+            }
+            
+            with open(config_path, 'w') as f:
+                json.dump(test_config, f)
+            
+            # Mock the config file path
+            with patch('convert.Path') as mock_path:
+                mock_path.return_value.parent.__truediv__.return_value = Path(config_path)
+                config = load_config()
+                self.assertEqual(config, test_config)
+
+    def test_parse_args_uses_config_defaults(self):
+        """Test that argument parser uses config values as defaults."""
+        from convert import parse_args, load_config
+        from unittest.mock import patch
+        import sys
+        
+        # Test with default config values
+        test_config = load_config()
+        
+        with patch('convert.load_config', return_value=test_config):
+            # Test default values
+            test_args = ['dummy.wav']
+            with patch('sys.argv', ['convert.py'] + test_args):
+                args = parse_args()
+                self.assertEqual(args.format, test_config['output_format'])
+                self.assertEqual(args.ascii_filename, test_config['ascii_filename'])
+                self.assertEqual(args.max_workers, test_config['max_parallel_processes'])
+                self.assertEqual(args.loudnorm, test_config['loudnorm'])
+                self.assertEqual(args.embed_cover, test_config['embed_cover'])
+                self.assertEqual(args.retry_attempts, test_config['retry_attempts'])
+                self.assertEqual(args.timeout, test_config['timeout_seconds'])
+
+    def test_parse_args_command_line_override(self):
+        """Test that command line arguments override config values."""
+        from convert import parse_args, load_config
+        from unittest.mock import patch
+        import sys
+        
+        test_config = load_config()
+        
+        with patch('convert.load_config', return_value=test_config):
+            # Test command line overrides
+            test_args = [
+                '--m4a',  # Should override output_format
+                '--ascii-filename',  # Should override ascii_filename
+                '--max-workers', '3',  # Should override max_parallel_processes
+                '--no-loudnorm',  # Should override loudnorm (False)
+                '--no-cover',  # Should override embed_cover (False)
+                '--retry-attempts', '7',  # Should override retry_attempts
+                '--timeout', '120',  # Should override timeout_seconds
+                'dummy.wav'
+            ]
+            with patch('sys.argv', ['convert.py'] + test_args):
+                args = parse_args()
+                self.assertEqual(args.format, 'm4a')  # Command line override
+                self.assertTrue(args.ascii_filename)  # Command line override
+                self.assertEqual(args.max_workers, 3)  # Command line override
+                self.assertFalse(args.loudnorm)  # Command line override
+                self.assertFalse(args.embed_cover)  # Command line override
+                self.assertEqual(args.retry_attempts, 7)  # Command line override
+                self.assertEqual(args.timeout, 120)  # Command line override
+
+    def test_convert_batch_ascii_filename_param(self):
+        """Test that convert_batch accepts and passes ascii_filename parameter."""
+        from convert import convert_batch, _convert_file_wrapper
+        from unittest.mock import patch
+        
+        # Mock convert_file to avoid actual processing
+        # _convert_file_wrapper expects convert_file to return (success, output)
+        # and then returns (wav_path, success, output)
+        with patch('convert.convert_file', return_value=(True, 'output.wav')) as mock_convert:
+            file_paths = ['file1.wav', 'file2.wav']
+            # Test with ascii_filename=False
+            results = convert_batch(file_paths, 'mp3', True, 2, False)
+            # Check that convert_file was called with ascii_filename=False
+            mock_convert.assert_any_call('file1.wav', 'mp3', False)
+            mock_convert.assert_any_call('file2.wav', 'mp3', False)
+            
+            # Reset mock
+            mock_convert.reset_mock()
+            
+            # Test with ascii_filename=True
+            results = convert_batch(file_paths, 'mp3', True, 2, True)
+            # Check that convert_file was called with ascii_filename=True
+            mock_convert.assert_any_call('file1.wav', 'mp3', True)
+            mock_convert.assert_any_call('file2.wav', 'mp3', True)
 
 
 class TestOnlineMetadataLookup(unittest.TestCase):

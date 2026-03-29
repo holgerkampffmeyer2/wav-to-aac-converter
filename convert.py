@@ -12,9 +12,11 @@ from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import wraps
 from urllib.parse import quote
+import unicodedata
 
-MAX_PARALLEL_PROCESSES = 5
-OUTPUT_FORMAT = 'mp3'
+# These constants are now loaded from config.json
+# MAX_PARALLEL_PROCESSES = 5
+# OUTPUT_FORMAT = 'mp3'
 
 OG_IMAGE_RE = re.compile(r'"og:image"\s+content="([^"]+)"')
 BANDCAMP_URL_RE = re.compile(r'https?://[^\s"\'<>]*\.bandcamp\.com/(?:track|album)/[^\s"\'<>]*')
@@ -49,6 +51,47 @@ def retry(max_attempts=3, delay=1, backoff=2):
             return None
         return wrapper
     return decorator
+
+
+def load_config():
+    """Load configuration from config.json file."""
+    config_path = Path(__file__).parent / 'config.json'
+    default_config = {
+        "ascii_filename": False,
+        "output_format": "mp3",
+        "max_parallel_processes": 5,
+        "loudnorm": True,
+        "embed_cover": True,
+        "retry_attempts": 3,
+        "timeout_seconds": 30
+    }
+    
+    try:
+        if config_path.exists():
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+                # Merge with defaults to ensure all keys exist
+                for key, value in default_config.items():
+                    if key not in config:
+                        config[key] = value
+                return config
+        else:
+            return default_config
+    except Exception as e:
+        print(f"Warning: Could not load config file: {e}")
+        return default_config
+
+
+def to_ascii_filename(filename):
+    """Convert Unicode filename to ASCII equivalent."""
+    # Normalize Unicode characters (decompose accents, etc.)
+    normalized = unicodedata.normalize('NFKD', filename)
+    # Remove non-ASCII characters
+    ascii_only = normalized.encode('ascii', 'ignore').decode('ascii')
+    # Clean up any extra spaces or special characters that might result
+    ascii_only = re.sub(r'[^\w\s\-_.()\[\]]', '', ascii_only)
+    ascii_only = re.sub(r'\s+', ' ', ascii_only).strip()
+    return ascii_only
 
 
 def run_cmd(cmd, capture_output=True, timeout=600):
@@ -1117,9 +1160,35 @@ def save_result_json(wav_path, metadata, loudness, output_name, success, has_cov
         json.dump(result, f, indent=2)
 
 
-def convert_file(wav_path, fmt='mp3'):
+def convert_file(wav_path, fmt='mp3', ascii_filename=False):
     """Convert a single WAV file to MP3 or M4A."""
-    print(f"Processing: {wav_path} -> {fmt.upper()}")
+    # Handle ASCII filename conversion if requested
+    original_wav_path = wav_path
+    temp_dir = None
+    if ascii_filename:
+        path_obj = Path(wav_path)
+        ascii_stem = to_ascii_filename(path_obj.stem)
+        if ascii_stem and ascii_stem != path_obj.stem:
+            # Create ASCII filename in temporary directory to avoid ffmpeg issues
+            import tempfile
+            temp_dir = tempfile.mkdtemp(prefix='wav2aac_')
+            ascii_filename_path = Path(temp_dir) / (ascii_stem + path_obj.suffix)
+            # Copy file to temporary location with ASCII name
+            try:
+                import shutil
+                shutil.copy2(original_wav_path, ascii_filename_path)
+                wav_path = str(ascii_filename_path)
+                print(f"  Using ASCII filename: {ascii_filename_path.name}")
+            except Exception as e:
+                print(f"  Warning: Could not create ASCII filename: {e}")
+                # Clean up temp directory on failure
+                if temp_dir and Path(temp_dir).exists():
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+                temp_dir = None
+        else:
+            wav_path = str(path_obj)  # Keep original if conversion didn't change anything
+    
+    print(f"Processing: {Path(wav_path).name if wav_path else 'Unknown'} -> {fmt.upper()}")
     
     wav_path = str(wav_path)
     base_name = Path(wav_path).stem
@@ -1241,10 +1310,16 @@ def convert_file(wav_path, fmt='mp3'):
     info = result if isinstance(result, dict) else {}
     if valid:
         print(f"  SUCCESS: {output_name} ({fmt.upper()}: {info.get(fmt)}, Cover: {info.get('cover')})")
+        # Clean up temporary directory if it was created
+        if temp_dir and Path(temp_dir).exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
         return True, output_name
     else:
         print(f"  FAIL: Verification failed - {result}")
         save_result_json(wav_path, metadata, loudness, output_name, False, bool(info.get('cover')), fmt)
+        # Clean up temporary directory if it was created
+        if temp_dir and Path(temp_dir).exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
         return False, None
 
 
@@ -1335,12 +1410,16 @@ def lookup_online_metadata(base_name: str):
 
 def _convert_file_wrapper(args):
     """Wrapper for parallel processing."""
-    wav_path, fmt = args
-    success, output = convert_file(wav_path, fmt)
+    if len(args) == 3:
+        wav_path, fmt, ascii_filename = args
+        success, output = convert_file(wav_path, fmt, ascii_filename)
+    else:
+        wav_path, fmt = args
+        success, output = convert_file(wav_path, fmt)
     return (wav_path, success, output)
 
 
-def convert_batch(file_paths, fmt='mp3', parallel=True, max_workers=MAX_PARALLEL_PROCESSES):
+def convert_batch(file_paths, fmt='mp3', parallel=True, max_workers=5, ascii_filename=False):
     """Convert multiple WAV files.
     
     Args:
@@ -1348,6 +1427,7 @@ def convert_batch(file_paths, fmt='mp3', parallel=True, max_workers=MAX_PARALLEL
         fmt: Output format ('mp3' or 'm4a')
         parallel: Use parallel processing (default: True)
         max_workers: Max parallel processes (default: 5)
+        ascii_filename: Convert Unicode filenames to ASCII (default: False)
     
     Returns:
         List of (wav_path, success, output) tuples
@@ -1356,13 +1436,13 @@ def convert_batch(file_paths, fmt='mp3', parallel=True, max_workers=MAX_PARALLEL
     
     if not parallel or len(file_paths) < 4:
         for wav_path in file_paths:
-            results.append(_convert_file_wrapper((wav_path, fmt)))
+            results.append(_convert_file_wrapper((wav_path, fmt, ascii_filename)))
         return results
     
     print(f"Converting {len(file_paths)} files in parallel (max {max_workers} workers)...")
     
     with ProcessPoolExecutor(max_workers=min(max_workers, len(file_paths))) as executor:
-        futures = {executor.submit(_convert_file_wrapper, (fp, fmt)): fp for fp in file_paths}
+        futures = {executor.submit(_convert_file_wrapper, (fp, fmt, ascii_filename)): fp for fp in file_paths}
         for future in as_completed(futures):
             results.append(future.result())
     
@@ -1371,6 +1451,9 @@ def convert_batch(file_paths, fmt='mp3', parallel=True, max_workers=MAX_PARALLEL
 
 def parse_args():
     """Parse command line arguments."""
+    # Load config first to use as defaults
+    config = load_config()
+    
     parser = argparse.ArgumentParser(
         description='WAV to MP3/M4A converter with loudness normalization and cover art.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1386,8 +1469,23 @@ Examples:
     format_group = parser.add_mutually_exclusive_group()
     format_group.add_argument('--mp3', action='store_true', help='Output MP3 format (default)')
     format_group.add_argument('--m4a', action='store_true', help='Output M4A/AAC format')
-    parser.add_argument('--format', choices=['mp3', 'm4a'], default='mp3',
+    parser.add_argument('--format', choices=['mp3', 'm4a'], default=config['output_format'],
                        help='Output format (default: mp3)')
+    parser.add_argument('--ascii-filename', action='store_true', 
+                       default=config['ascii_filename'],
+                       help='Convert Unicode filenames to ASCII (default: false)')
+    parser.add_argument('--max-workers', type=int, default=config['max_parallel_processes'],
+                       help=f'Max parallel processes (default: {config["max_parallel_processes"]})')
+    parser.add_argument('--no-loudnorm', action='store_false', dest='loudnorm',
+                       default=config['loudnorm'],
+                       help='Disable loudness normalization')
+    parser.add_argument('--no-cover', action='store_false', dest='embed_cover',
+                       default=config['embed_cover'],
+                       help='Disable cover art embedding')
+    parser.add_argument('--retry-attempts', type=int, default=config['retry_attempts'],
+                       help=f'Retry attempts for failed operations (default: {config["retry_attempts"]})')
+    parser.add_argument('--timeout', type=int, default=config['timeout_seconds'],
+                       help=f'Timeout in seconds for operations (default: {config["timeout_seconds"]})')
     parser.add_argument('files', nargs='+', help='WAV file(s) to convert')
     return parser.parse_args()
 
@@ -1409,10 +1507,10 @@ if __name__ == '__main__':
     print(f"Output format: {fmt.upper()}")
     
     if len(wav_files) == 1:
-        success, output = convert_file(wav_files[0], fmt)
+        success, output = convert_file(wav_files[0], fmt, ascii_filename=args.ascii_filename)
         sys.exit(0 if success else 1)
     
-    results = convert_batch(wav_files, fmt)
+    results = convert_batch(wav_files, fmt, parallel=(len(wav_files) >= 4), max_workers=args.max_workers, ascii_filename=args.ascii_filename)
     
     success_count = sum(1 for _, s, _ in results if s)
     print(f"\nBatch complete: {success_count}/{len(results)} succeeded")
