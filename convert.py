@@ -521,6 +521,93 @@ def search_soundcloud_web(artist, title, filename=""):
                         sc_url = f"https://soundcloud.com/{handle}/{slug}{suffix}"
                         if sc_url not in searched:
                             searched.add(sc_url)
+                            img_url = _fetch_soundcloud_cover(sc_url)
+                            if img_url:
+                                return (artist, title), img_url
+        # Also try the handle alone (artist profile page) - though this is less likely to have cover art for a specific track
+        sc_url = f"https://soundcloud.com/{handle}"
+        if sc_url not in searched:
+            searched.add(sc_url)
+            img_url = _fetch_soundcloud_cover(sc_url)
+            if img_url:
+                return (artist, title), img_url
+    
+    return None, None
+    
+    # Extract handles from filename
+    filename_handles = extract_handles(filename or "")
+    # Generate potential handles from artist name
+    artist_handles = _generate_soundcloud_handles_from_artist(artist)
+    # Combine and deduplicate
+    all_handles = list(set(filename_handles + artist_handles))
+    
+    # Clean title for search: remove filename handles and bracketed content
+    cleaned_title = title
+    for handle in filename_handles:  # Only remove handles that came from the filename
+        cleaned_title = re.sub(r'\[' + re.escape(handle) + r'\]', '', cleaned_title, flags=re.IGNORECASE)
+    cleaned_title = BRACKET_CLEANUP_RE.sub('', cleaned_title)
+    cleaned_title = re.sub(r'[_-]+', '-', cleaned_title)
+    track_base_from_title = cleaned_title.lower().replace('(', '-').replace(')', '').replace(' ', '-')
+    for kw in ['remix', 'edit', 'mix', 'master', 'loud', 'dub', 'clean', 'explicit', 'instrumental', 'acappella', 'radio', 'original', 'free', 'download']:
+        track_base_from_title = re.sub(rf'-{kw}-?', '-', track_base_from_title)
+    track_base_from_title = MULTI_DASH_RE.sub('-', track_base_from_title).strip('-')
+    
+    # Also try to get track base from the part before the first ' - ' in filename
+    track_base_from_filename = ""
+    if ' - ' in filename:
+        before_dash = filename.split(' - ')[0].strip()
+        # Clean it: make lowercase, replace non-alphanumeric with hyphen, collapse hyphens
+        temp = re.sub(r'[^\w]+', '-', before_dash).lower()
+        track_base_from_filename = MULTI_DASH_RE.sub('-', temp).strip('-')
+    
+    # We'll try both track bases
+    track_bases_to_try = set()
+    if track_base_from_title:
+        track_bases_to_try.add(track_base_from_title)
+    if track_base_from_filename:
+        track_bases_to_try.add(track_base_from_filename)
+    
+    artist_slug = artist.lower().replace(' ', '-') if artist else ''
+    
+    searched = set()
+    
+    # Try combinations of handles and track bases
+    for handle in all_handles:
+        if len(handle) < 3:
+            continue
+        for track_base in track_bases_to_try:
+            if not track_base:
+                continue
+            # Try the track base alone as the slug (most common pattern: artist/track)
+            slug = track_base
+            slug = MULTI_DASH_RE.sub('-', slug).strip('-')
+            if slug and len(slug) >= 3:
+                for suffix in ['', '-free-download', '-free', '-download', '-dub', '-loud', '-master']:
+                    sc_url = f"https://soundcloud.com/{handle}/{slug}{suffix}"
+                    if sc_url not in searched:
+                        searched.add(sc_url)
+                        img_url = _fetch_soundcloud_cover(sc_url)
+                        if img_url:
+                            return (artist, title), img_url
+            # Try artist_slug + track_base as the slug
+            slug = f"{artist_slug}-{track_base}"
+            slug = MULTI_DASH_RE.sub('-', slug).strip('-')
+            if slug and len(slug) >= 3:
+                for suffix in ['', '-free-download', '-free', '-download', '-dub', '-loud', '-master']:
+                    sc_url = f"https://soundcloud.com/{handle}/{slug}{suffix}"
+                    if sc_url not in searched:
+                        searched.add(sc_url)
+                        img_url = _fetch_soundcloud_cover(sc_url)
+                        if img_url:
+                            return (artist, title), img_url
+            # Try the original combinations for completeness
+            for slug in [f"{artist_slug}-{track_base}-{handle}", f"{handle}-{track_base}", f"{track_base}-{handle}"]:
+                slug = MULTI_DASH_RE.sub('-', slug).strip('-')
+                if slug and len(slug) >= 3:
+                    for suffix in ['', '-free-download', '-free', '-download', '-dub', '-loud', '-master']:
+                        sc_url = f"https://soundcloud.com/{handle}/{slug}{suffix}"
+                        if sc_url not in searched:
+                            searched.add(sc_url)
                         img_url = _fetch_soundcloud_cover(sc_url)
                         if img_url:
                             return (artist, title), img_url
