@@ -8,11 +8,15 @@ import os
 import re
 import time
 import argparse
+import logging
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import wraps
 from urllib.parse import quote
 import unicodedata
+from typing import Optional, Tuple, Dict, Any, List, Set, Union
+
+logger = logging.getLogger(__name__)
 
 # These constants are now loaded from config.json
 # MAX_PARALLEL_PROCESSES = 5
@@ -32,7 +36,7 @@ REMIX_KEYWORDS_RE = re.compile(
 USER_AGENT = '"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"'
 
 
-def retry(max_attempts=3, delay=1, backoff=2):
+def retry(max_attempts: int = 3, delay: int = 1, backoff: int = 2):
     """Retry decorator with exponential backoff for HTTP operations."""
     def decorator(func):
         @wraps(func)
@@ -53,10 +57,10 @@ def retry(max_attempts=3, delay=1, backoff=2):
     return decorator
 
 
-def load_config():
+def load_config() -> Dict[str, Any]:
     """Load configuration from config.json file."""
     config_path = Path(__file__).parent / 'config.json'
-    default_config = {
+    default_config: Dict[str, Any] = {
         "ascii_filename": False,
         "output_format": "mp3",
         "max_parallel_processes": 5,
@@ -78,11 +82,11 @@ def load_config():
         else:
             return default_config
     except Exception as e:
-        print(f"Warning: Could not load config file: {e}")
+        logger.warning(f"Could not load config file: {e}")
         return default_config
 
 
-def to_ascii_filename(filename):
+def to_ascii_filename(filename: str) -> str:
     """Convert Unicode filename to ASCII equivalent."""
     # Normalize Unicode characters (decompose accents, etc.)
     normalized = unicodedata.normalize('NFKD', filename)
@@ -94,7 +98,7 @@ def to_ascii_filename(filename):
     return ascii_only
 
 
-def run_cmd(cmd, capture_output=True, timeout=600):
+def run_cmd(cmd: str, capture_output: bool = True, timeout: int = 600) -> Tuple[bool, str, str]:
     """Run shell command and return output."""
     try:
         result = subprocess.run(
@@ -105,7 +109,7 @@ def run_cmd(cmd, capture_output=True, timeout=600):
         return False, "", "Command timed out"
 
 
-def analyze_loudness(wav_path):
+def analyze_loudness(wav_path: str) -> Optional[Dict[str, Any]]:
     """Analyze loudness of WAV file using first 5 minutes for speed."""
     cmd = f'ffmpeg -t 300 -i "{wav_path}" -af loudnorm=print_format=json -f null - 2>&1'
     success, stdout, stderr = run_cmd(cmd)
@@ -121,7 +125,7 @@ def analyze_loudness(wav_path):
         return None
 
 
-def extract_metadata(wav_path):
+def extract_metadata(wav_path: str) -> Dict[str, Any]:
     """Extract metadata from WAV file."""
     cmd = f'ffprobe -v quiet -print_format json -show_format -show_streams "{wav_path}"'
     success, stdout, _ = run_cmd(cmd)
@@ -142,7 +146,7 @@ def extract_metadata(wav_path):
         return {}
 
 
-def fetch_url(url, timeout=15, headers=None, method='GET', data=None):
+def fetch_url(url: str, timeout: int = 15, headers: Optional[Dict[str, str]] = None, method: str = 'GET', data: Optional[Dict[str, str]] = None) -> str:
     """Fetch URL content with configurable options.
     
     Args:
@@ -156,7 +160,7 @@ def fetch_url(url, timeout=15, headers=None, method='GET', data=None):
         str: Response content or empty string on failure
     """
     # Default headers
-    default_headers = {
+    default_headers: Dict[str, str] = {
         'User-Agent': USER_AGENT.strip('"'),
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
     }
@@ -197,7 +201,7 @@ def fetch_url(url, timeout=15, headers=None, method='GET', data=None):
 
 
 @retry(max_attempts=3, delay=1, backoff=2)
-def search_deezer_cover(artist, title):
+def search_deezer_cover(artist: str, title: str) -> Optional[str]:
     """Search Deezer API for cover art."""
     if not artist and not title:
         return None
@@ -216,7 +220,7 @@ def search_deezer_cover(artist, title):
 
 
 @retry(max_attempts=3, delay=1, backoff=2)
-def search_bandcamp_cover(artist, title):
+def search_bandcamp_cover(artist: str, title: str) -> Optional[str]:
     """Search Bandcamp for cover art via web search."""
     if not artist and not title:
         return None
@@ -241,17 +245,17 @@ def search_bandcamp_cover(artist, title):
     return None
 
 
-def extract_handles(filename):
+def extract_handles(filename: str) -> List[str]:
     """Extract SoundCloud handles from filename."""
     return [h for h in HANDLE_RE.findall(filename.lower()) if len(h) >= 3]
 
 
-def clean_title_for_search(title):
+def clean_title_for_search(title: str) -> str:
     """Remove remix/edit/etc. info from title for cover art search.
     
     Removes any bracket (with nested content) if it contains remix/edit/etc. keywords.
     """
-    def find_matching_paren(text, start):
+    def find_matching_paren(text: str, start: int) -> int:
         """Find the closing paren/bracket for the opener at start."""
         opener = text[start]
         closer = ']' if opener == '[' else ')'
@@ -266,7 +270,7 @@ def clean_title_for_search(title):
                         return i
         return -1
     
-    def strip_brackets(text):
+    def strip_brackets(text: str) -> str:
         """Remove brackets containing keywords."""
         removed_something = True
         while removed_something:
@@ -289,7 +293,7 @@ def clean_title_for_search(title):
     return strip_brackets(title)
 
 
-def _fetch_soundcloud_cover(sc_url):
+def _fetch_soundcloud_cover(sc_url: str) -> Optional[str]:
     """Fetch cover art from a SoundCloud page."""
     content = _fetch_url(sc_url)
     if not content:
@@ -305,17 +309,17 @@ def _fetch_soundcloud_cover(sc_url):
     return None
 
 
-def _fetch_url(url):
+def _fetch_url(url: str) -> str:
     """Internal helper to fetch URL for SoundCloud (reuses fetch_url logic)."""
     # Reuse the existing fetch_url function but without parameters for simplicity in this context
     return fetch_url(url)
 
 
-def _generate_soundcloud_handles_from_artist(artist):
+def _generate_soundcloud_handles_from_artist(artist: str) -> List[str]:
     """Generate potential SoundCloud handles from an artist name."""
     if not artist:
         return []
-    handles = set()
+    handles: Set[str] = set()
     # Basic conversions
     artist_lower = artist.lower()
     # Replace spaces and punctuation with hyphens, then clean
@@ -355,7 +359,7 @@ def _generate_soundcloud_handles_from_artist(artist):
     return list(handles)
 
 
-def search_soundcloud_web(artist, title, filename=""):
+def search_soundcloud_web(artist: str, title: str, filename: str = "") -> Tuple[Optional[Tuple[str, str]], Optional[str]]:
     """Search SoundCloud via web for track info and cover art."""
     if not artist and not title and not filename:
         return None, None
@@ -365,37 +369,37 @@ def search_soundcloud_web(artist, title, filename=""):
     # Generate potential handles from artist name
     artist_handles = _generate_soundcloud_handles_from_artist(artist)
     # Combine and deduplicate
-    all_handles = list(set(filename_handles + artist_handles))
+    all_handles: List[str] = list(set(filename_handles + artist_handles))
     
     # Clean title for search: remove filename handles and bracketed content
-    cleaned_title = title
+    cleaned_title: str = title
     for handle in filename_handles:  # Only remove handles that came from the filename
         cleaned_title = re.sub(r'\[' + re.escape(handle) + r'\]', '', cleaned_title, flags=re.IGNORECASE)
     cleaned_title = BRACKET_CLEANUP_RE.sub('', cleaned_title)
     cleaned_title = re.sub(r'[_-]+', '-', cleaned_title)
-    track_base_from_title = cleaned_title.lower().replace('(', '-').replace(')', '').replace(' ', '-')
+    track_base_from_title: str = cleaned_title.lower().replace('(', '-').replace(')', '').replace(' ', '-')
     for kw in ['remix', 'edit', 'mix', 'master', 'loud', 'dub', 'clean', 'explicit', 'instrumental', 'acappella', 'radio', 'original', 'free', 'download']:
         track_base_from_title = re.sub(rf'-{kw}-?', '-', track_base_from_title)
     track_base_from_title = MULTI_DASH_RE.sub('-', track_base_from_title).strip('-')
     
     # Also try to get track base from the part before the first ' - ' in filename
-    track_base_from_filename = ""
+    track_base_from_filename: str = ""
     if ' - ' in filename:
         before_dash = filename.split(' - ')[0].strip()
         # Clean it: make lowercase, replace non-alphanumeric with hyphen, collapse hyphens
-        temp = re.sub(r'[^\w]+', '-', before_dash).lower()
+        temp: str = re.sub(r'[^\w]+', '-', before_dash).lower()
         track_base_from_filename = MULTI_DASH_RE.sub('-', temp).strip('-')
     
     # We'll try both track bases
-    track_bases_to_try = set()
+    track_bases_to_try: Set[str] = set()
     if track_base_from_title:
         track_bases_to_try.add(track_base_from_title)
     if track_base_from_filename:
         track_bases_to_try.add(track_base_from_filename)
     
-    artist_slug = artist.lower().replace(' ', '-') if artist else ''
+    artist_slug: str = artist.lower().replace(' ', '-') if artist else ''
     
-    searched = set()
+    searched: Set[str] = set()
     
     # Try combinations of handles and track bases
     for handle in all_handles:
@@ -405,43 +409,43 @@ def search_soundcloud_web(artist, title, filename=""):
             if not track_base:
                 continue
             # Try the track base alone as the slug (most common pattern: artist/track)
-            slug = track_base
+            slug: str = track_base
             slug = MULTI_DASH_RE.sub('-', slug).strip('-')
             if slug and len(slug) >= 3:
                 for suffix in ['', '-free-download', '-free', '-download', '-dub', '-loud', '-master']:
-                    sc_url = f"https://soundcloud.com/{handle}/{slug}{suffix}"
+                    sc_url: str = f"https://soundcloud.com/{handle}/{slug}{suffix}"
                     if sc_url not in searched:
                         searched.add(sc_url)
-                        img_url = _fetch_soundcloud_cover(sc_url)
+                        img_url: Optional[str] = _fetch_soundcloud_cover(sc_url)
                         if img_url:
                             return (artist, title), img_url
             # Try artist_slug + track_base as the slug
-            slug = f"{artist_slug}-{track_base}"
+            slug: str = f"{artist_slug}-{track_base}"
             slug = MULTI_DASH_RE.sub('-', slug).strip('-')
             if slug and len(slug) >= 3:
                 for suffix in ['', '-free-download', '-free', '-download', '-dub', '-loud', '-master']:
-                    sc_url = f"https://soundcloud.com/{handle}/{slug}{suffix}"
+                    sc_url: str = f"https://soundcloud.com/{handle}/{slug}{suffix}"
                     if sc_url not in searched:
                         searched.add(sc_url)
-                        img_url = _fetch_soundcloud_cover(sc_url)
+                        img_url: Optional[str] = _fetch_soundcloud_cover(sc_url)
                         if img_url:
                             return (artist, title), img_url
             # Try the original combinations for completeness
             for slug in [f"{artist_slug}-{track_base}-{handle}", f"{handle}-{track_base}", f"{track_base}-{handle}"]:
-                slug = MULTI_DASH_RE.sub('-', slug).strip('-')
+                slug: str = MULTI_DASH_RE.sub('-', slug).strip('-')
                 if slug and len(slug) >= 3:
                     for suffix in ['', '-free-download', '-free', '-download', '-dub', '-loud', '-master']:
-                        sc_url = f"https://soundcloud.com/{handle}/{slug}{suffix}"
+                        sc_url: str = f"https://soundcloud.com/{handle}/{slug}{suffix}"
                         if sc_url not in searched:
                             searched.add(sc_url)
-                            img_url = _fetch_soundcloud_cover(sc_url)
+                            img_url: Optional[str] = _fetch_soundcloud_cover(sc_url)
                             if img_url:
                                 return (artist, title), img_url
         # Also try the handle alone (artist profile page) - though this is less likely to have cover art for a specific track
-        sc_url = f"https://soundcloud.com/{handle}"
+        sc_url: str = f"https://soundcloud.com/{handle}"
         if sc_url not in searched:
             searched.add(sc_url)
-            img_url = _fetch_soundcloud_cover(sc_url)
+            img_url: Optional[str] = _fetch_soundcloud_cover(sc_url)
             if img_url:
                 return (artist, title), img_url
     
@@ -834,15 +838,14 @@ def search_soundcloud_web(artist, title, filename=""):
     found_img_url = None
     found_web_metadata = None
     
-    # DEBUG: Print what we're working with
-    print(f"DEBUG SoundCloud search: artist='{artist}', title='{title}', filename='{filename}'")
-    print(f"DEBUG SoundCloud search: filename_handles={filename_handles}")
-    print(f"DEBUG SoundCloud search: artist_handles={artist_handles}")
-    print(f"DEBUG SoundCloud search: all_handles={all_handles}")
-    print(f"DEBUG SoundCloud search: track_base_from_title='{track_base_from_title}'")
-    print(f"DEBUG SoundCloud search: track_base_from_filename='{track_base_from_filename}'")
-    print(f"DEBUG SoundCloud search: track_bases_to_try={list(track_bases_to_try)}")
-    print(f"DEBUG SoundCloud search: artist_slug='{artist_slug}'")
+    logger.debug(f"SoundCloud search: artist='{artist}', title='{title}', filename='{filename}'")
+    logger.debug(f"SoundCloud search: filename_handles={filename_handles}")
+    logger.debug(f"SoundCloud search: artist_handles={artist_handles}")
+    logger.debug(f"SoundCloud search: all_handles={all_handles}")
+    logger.debug(f"SoundCloud search: track_base_from_title='{track_base_from_title}'")
+    logger.debug(f"SoundCloud search: track_base_from_filename='{track_base_from_filename}'")
+    logger.debug(f"SoundCloud search: track_bases_to_try={list(track_bases_to_try)}")
+    logger.debug(f"SoundCloud search: artist_slug='{artist_slug}'")
     
     # Try combinations of handles and track bases
     for handle in all_handles:
@@ -859,11 +862,10 @@ def search_soundcloud_web(artist, title, filename=""):
                     sc_url = f"https://soundcloud.com/{handle}/{slug}{suffix}"
                     if sc_url not in searched:
                         searched.add(sc_url)
-                        # DEBUG: Print the URL we're trying
-                        print(f"DEBUG SoundCloud search: Trying URL: {sc_url}")
+                        logger.debug(f"SoundCloud search: Trying URL: {sc_url}")
                         img_url = _fetch_soundcloud_cover(sc_url)
                         if img_url:
-                            print(f"DEBUG SoundCloud search: FOUND COVER: {img_url}")
+                            logger.debug(f"SoundCloud search: FOUND COVER: {img_url}")
                             return (artist, title), img_url
             # Try artist_slug + track_base as the slug
             slug = f"{artist_slug}-{track_base}"
@@ -873,11 +875,10 @@ def search_soundcloud_web(artist, title, filename=""):
                     sc_url = f"https://soundcloud.com/{handle}/{slug}{suffix}"
                     if sc_url not in searched:
                         searched.add(sc_url)
-                        # DEBUG: Print the URL we're trying
-                        print(f"DEBUG SoundCloud search: Trying URL: {sc_url}")
+                        logger.debug(f"SoundCloud search: Trying URL: {sc_url}")
                         img_url = _fetch_soundcloud_cover(sc_url)
                         if img_url:
-                            print(f"DEBUG SoundCloud search: FOUND COVER: {img_url}")
+                            logger.debug(f"SoundCloud search: FOUND COVER: {img_url}")
                             return (artist, title), img_url
             # Try the original combinations for completeness
             for slug in [f"{artist_slug}-{track_base}-{handle}", f"{handle}-{track_base}", f"{track_base}-{handle}"]:
@@ -887,24 +888,22 @@ def search_soundcloud_web(artist, title, filename=""):
                         sc_url = f"https://soundcloud.com/{handle}/{slug}{suffix}"
                         if sc_url not in searched:
                             searched.add(sc_url)
-                            # DEBUG: Print the URL we're trying
-                            print(f"DEBUG SoundCloud search: Trying URL: {sc_url}")
+                            logger.debug(f"SoundCloud search: Trying URL: {sc_url}")
                             img_url = _fetch_soundcloud_cover(sc_url)
                             if img_url:
-                                print(f"DEBUG SoundCloud search: FOUND COVER: {img_url}")
+                                logger.debug(f"SoundCloud search: FOUND COVER: {img_url}")
                                 return (artist, title), img_url
         # Also try the handle alone (artist profile page) - though this is less likely to have cover art for a specific track
         sc_url = f"https://soundcloud.com/{handle}"
         if sc_url not in searched:
             searched.add(sc_url)
-            # DEBUG: Print the URL we're trying
-            print(f"DEBUG SoundCloud search: Trying profile URL: {sc_url}")
+            logger.debug(f"SoundCloud search: Trying profile URL: {sc_url}")
             img_url = _fetch_soundcloud_cover(sc_url)
             if img_url:
-                print(f"DEBUG SoundCloud search: FOUND COVER from profile: {img_url}")
+                logger.debug(f"SoundCloud search: FOUND COVER from profile: {img_url}")
                 return (artist, title), img_url
     
-    print(f"DEBUG SoundCloud search: NO COVER FOUND after trying {len(searched)} URLs")
+    logger.debug(f"SoundCloud search: NO COVER FOUND after trying {len(searched)} URLs")
     return None, None
     
     handles = extract_handles(filename or "")
@@ -1057,12 +1056,12 @@ def search_soundcloud_web(artist, title, filename=""):
     return None, None
 
 
-def search_all_sources(artist, title, filename=""):
+def search_all_sources(artist: str, title: str, filename: str = "") -> Tuple[Dict[str, Any], Optional[str]]:
     """Search all online sources for track metadata and cover art.
     Returns: (metadata dict, cover_url)
     """
-    result_metadata = {}
-    cover_url = None
+    result_metadata: Dict[str, Any] = {}
+    cover_url: Optional[str] = None
     
     if not artist and not title:
         return result_metadata, cover_url
@@ -1075,27 +1074,25 @@ def search_all_sources(artist, title, filename=""):
     
     for source_name, search_func in sources:
         try:
-            found_cover = search_func(artist, title)
+            found_cover: Optional[str] = search_func(artist, title)
             if found_cover and not cover_url:
                 cover_url = found_cover
-                print(f"  {source_name} cover found")
+                logger.info(f"  {source_name} cover found")
         except Exception as e:
-            print(f"  {source_name} search failed: {e}")
+            logger.warning(f"  {source_name} search failed: {e}")
     
     return result_metadata, cover_url
 
 
-def extract_metadata_from_filename(filename):
+def extract_metadata_from_filename(filename: str) -> Dict[str, Any]:
     """Extract artist and title from filename with improved robustness."""
     name = Path(filename).stem.strip()
     
     # Define descriptive terms that should NOT be treated as artists even if found in brackets
-    descriptive_terms = {
+    descriptive_terms: Set[str] = {
         'remix', 'edit', 'mix', 'flip', 'rework', 'cover', 'feat', 'ft', 'featuring',
         'radio', 'clean', 'explicit', 'instrumental', 'acappella', 'dub', 'master',
         'extended', 'version', 'cut', 'mixshow', 'club', 'original', 'live', 'draft',
-        'preview', 'teaser', 'snippet', 'demo', 'test', 'unmastered', 'unreleased',
-        'wip', 'work in progress', 'flip', 'bootleg', 'vip', 'dbl', 'tb'
     }
     
     # Handle leading bracketed terms
@@ -1334,9 +1331,8 @@ def save_result_json(wav_path, metadata, loudness, output_name, success, has_cov
         json.dump(result, f, indent=2)
 
 
-def convert_file(wav_path, fmt='mp3'):
+def convert_file(wav_path: str, fmt: str = 'mp3') -> Tuple[bool, Optional[str]]:
     """Convert a single WAV file to MP3 or M4A."""
-    # Always create ASCII filename copy in temporary directory to avoid ffmpeg issues with Unicode
     original_wav_path = wav_path
     temp_dir = None
     try:
@@ -1353,15 +1349,15 @@ def convert_file(wav_path, fmt='mp3'):
             shutil.copy2(original_wav_path, ascii_filename_path)
             wav_path = str(ascii_filename_path)
             if ascii_stem != path_obj.stem:
-                print(f"  Using ASCII filename: {ascii_filename_path.name}")
+                logger.info(f"  Using ASCII filename: {ascii_filename_path.name}")
             else:
-                print(f"  Using filename: {ascii_filename_path.name} (already ASCII)")
+                logger.info(f"  Using filename: {ascii_filename_path.name} (already ASCII)")
         else:
             # Fallback to original filename if ASCII conversion results in empty string
             wav_path = str(path_obj)
-            print(f"  Using filename: {Path(wav_path).name}")
+            logger.info(f"  Using filename: {Path(wav_path).name}")
     except Exception as e:
-        print(f"  Warning: Could not create ASCII filename: {e}")
+        logger.warning(f"  Could not create ASCII filename: {e}")
         # Fall back to original path
         wav_path = str(original_wav_path)
         # Clean up temp directory on failure
@@ -1379,15 +1375,15 @@ def convert_file(wav_path, fmt='mp3'):
     
     loudness = analyze_loudness(wav_path)
     if not loudness:
-        print(f"  FAIL: Loudness analysis failed")
+        logger.error(f"  Loudness analysis failed")
         return False, None
-    print(f"  Loudness: {loudness.get('input_i', 'N/A')} LUFS, True Peak: {loudness.get('input_tp', 'N/A')} dB")
+    logger.info(f"  Loudness: {loudness.get('input_i', 'N/A')} LUFS, True Peak: {loudness.get('input_tp', 'N/A')} dB")
     
     input_tp = float(loudness.get('input_tp', -10))
     gain_db = min(0, -0.1 - input_tp)
     
     metadata = extract_metadata(wav_path)
-    print(f"  Metadata: {metadata}")
+    logger.debug(f"  Metadata: {metadata}")
     
     search_artist = metadata.get('artist', '')
     search_title = metadata.get('title', '')
@@ -1399,7 +1395,7 @@ def convert_file(wav_path, fmt='mp3'):
             search_artist, search_title = online_artist, online_title
             metadata['artist'] = search_artist
             metadata['title'] = search_title
-            print(f"  Metadata: found via online lookup → {search_artist} – {search_title}")
+            logger.info(f"  Metadata: found via online lookup → {search_artist} – {search_title}")
         else:
             # Fallback to filename parser
             artist, title = extract_metadata_from_filename(base_name)
@@ -1409,7 +1405,7 @@ def convert_file(wav_path, fmt='mp3'):
             if not search_title:
                 search_title = title
                 metadata['title'] = title
-            print(f"  Metadata: derived from filename → {search_artist} – {search_title}")
+            logger.info(f"  Metadata: derived from filename → {search_artist} – {search_title}")
     
     metadata = {k: v for k, v in metadata.items() if isinstance(v, str)}
     
@@ -1420,7 +1416,7 @@ def convert_file(wav_path, fmt='mp3'):
     success, _, _ = run_cmd(cmd)
     if Path(temp_cover).exists():
         cover_path = temp_cover
-        print(f"  Cover: Extracted from source")
+        logger.info(f"  Cover: Extracted from source")
     else:
         local_cover = find_local_cover(wav_path)
         if local_cover:
@@ -1430,24 +1426,24 @@ def convert_file(wav_path, fmt='mp3'):
                     cover_path = temp_cover
             else:
                 cover_path = local_cover
-            print(f"  Cover: Found local file")
+            logger.info(f"  Cover: Found local file")
         else:
             search_title_clean = clean_title_for_search(search_title)
             
             cover_url = search_deezer_cover(search_artist, search_title_clean)
             if cover_url:
                 download_cover(cover_url, temp_cover)
-                print(f"  Cover: Downloaded from Deezer")
+                logger.info(f"  Cover: Downloaded from Deezer")
             elif search_artist or search_title:
                 cover_url = search_bandcamp_cover(search_artist, search_title_clean)
                 if cover_url:
                     download_cover(cover_url, temp_cover)
-                    print(f"  Cover: Downloaded from Bandcamp")
+                    logger.info(f"  Cover: Downloaded from Bandcamp")
                 else:
                     web_metadata, cover_url = search_soundcloud_web(search_artist, search_title, base_name)
                     if cover_url:
                         download_cover(cover_url, temp_cover)
-                        print(f"  Cover: Downloaded from SoundCloud")
+                        logger.info(f"  Cover: Downloaded from SoundCloud")
                         if web_metadata and not metadata.get('artist'):
                             metadata['artist'] = web_metadata[0] or ''
                         if web_metadata and not metadata.get('title'):
@@ -1456,12 +1452,12 @@ def convert_file(wav_path, fmt='mp3'):
             if Path(temp_cover).exists():
                 cover_path = temp_cover
             else:
-                print(f"  Cover: Not found")
+                logger.debug(f"  Cover: Not found")
     
     success = encode_audio(wav_path, temp_output, metadata, gain_db, fmt)
     
     if not success:
-        print(f"  FAIL: Encoding failed")
+        logger.error(f"  Encoding failed")
         save_result_json(wav_path, metadata, loudness, output_name, False, False, fmt)
         for f in [temp_output, temp_cover]:
             if f and Path(f).exists():
@@ -1478,7 +1474,7 @@ def convert_file(wav_path, fmt='mp3'):
             if cover_path == temp_cover and Path(temp_cover).exists():
                 os.remove(temp_cover)
         else:
-            print(f"  FAIL: Cover embedding failed, using raw file")
+            logger.warning(f"  Cover embedding failed, using raw file")
             os.rename(temp_output, output_name)
             if cover_path == temp_cover and Path(temp_cover).exists():
                 os.remove(temp_cover)
@@ -1488,13 +1484,133 @@ def convert_file(wav_path, fmt='mp3'):
     valid, result = verify_output(output_name, fmt)
     info = result if isinstance(result, dict) else {}
     if valid:
-        print(f"  SUCCESS: {output_name} ({fmt.upper()}: {info.get(fmt)}, Cover: {info.get('cover')})")
+        logger.info(f"  SUCCESS: {output_name} ({fmt.upper()}: {info.get(fmt)}, Cover: {info.get('cover')})")
         # Clean up temporary directory if it was created
         if temp_dir and Path(temp_dir).exists():
             shutil.rmtree(temp_dir, ignore_errors=True)
         return True, output_name
     else:
-        print(f"  FAIL: Verification failed - {result}")
+        logger.error(f"  FAIL: Verification failed - {result}")
+        save_result_json(wav_path, metadata, loudness, output_name, False, bool(info.get('cover')), fmt)
+        # Clean up temporary directory if it was created
+        if temp_dir and Path(temp_dir).exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        return False, None
+    
+    logger.info(f"  Loudness: {loudness.get('input_i', 'N/A')} LUFS, True Peak: {loudness.get('input_tp', 'N/A')} dB")
+    
+    input_tp = float(loudness.get('input_tp', -10))
+    gain_db = min(0, -0.1 - input_tp)
+    
+    metadata = extract_metadata(wav_path)
+    logger.debug(f"  Metadata: {metadata}")
+    
+    search_artist = metadata.get('artist', '')
+    search_title = metadata.get('title', '')
+    
+    # If we don't have both artist and title from tags, try online lookup
+    if not (search_artist and search_title):
+        online_artist, online_title = lookup_online_metadata(base_name)
+        if online_artist and online_title:
+            search_artist, search_title = online_artist, online_title
+            metadata['artist'] = search_artist
+            metadata['title'] = search_title
+            logger.info(f"  Metadata: found via online lookup → {search_artist} – {search_title}")
+        else:
+            # Fallback to filename parser
+            artist, title = extract_metadata_from_filename(base_name)
+            if not search_artist:
+                search_artist = artist
+                metadata['artist'] = artist
+            if not search_title:
+                search_title = title
+                metadata['title'] = title
+            logger.info(f"  Metadata: derived from filename → {search_artist} – {search_title}")
+    
+    metadata = {k: v for k, v in metadata.items() if isinstance(v, str)}
+    
+    cover_path = None
+    web_metadata = None
+    
+    cmd = f'ffmpeg -y -i "{wav_path}" -map 0:v -map -0:a -c:v copy "{temp_cover}" 2>/dev/null'
+    success, _, _ = run_cmd(cmd)
+    if Path(temp_cover).exists():
+        cover_path = temp_cover
+        logger.info(f"  Cover: Extracted from source")
+    else:
+        local_cover = find_local_cover(wav_path)
+        if local_cover:
+            if local_cover.lower().endswith('.png'):
+                success, _, _ = run_cmd(f'ffmpeg -y -i "{local_cover}" "{temp_cover}" 2>/dev/null')
+                if success and Path(temp_cover).exists():
+                    cover_path = temp_cover
+            else:
+                cover_path = local_cover
+            logger.info(f"  Cover: Found local file")
+        else:
+            search_title_clean = clean_title_for_search(search_title)
+            
+            cover_url = search_deezer_cover(search_artist, search_title_clean)
+            if cover_url:
+                download_cover(cover_url, temp_cover)
+                logger.info(f"  Cover: Downloaded from Deezer")
+            elif search_artist or search_title:
+                cover_url = search_bandcamp_cover(search_artist, search_title_clean)
+                if cover_url:
+                    download_cover(cover_url, temp_cover)
+                    logger.info(f"  Cover: Downloaded from Bandcamp")
+                else:
+                    web_metadata, cover_url = search_soundcloud_web(search_artist, search_title, base_name)
+                    if cover_url:
+                        download_cover(cover_url, temp_cover)
+                        logger.info(f"  Cover: Downloaded from SoundCloud")
+                        if web_metadata and not metadata.get('artist'):
+                            metadata['artist'] = web_metadata[0] or ''
+                        if web_metadata and not metadata.get('title'):
+                            metadata['title'] = web_metadata[1] or ''
+            
+            if Path(temp_cover).exists():
+                cover_path = temp_cover
+            else:
+                logger.debug(f"  Cover: Not found")
+    
+    success = encode_audio(wav_path, temp_output, metadata, gain_db, fmt)
+    
+    if not success:
+        logger.error(f"  Encoding failed")
+        save_result_json(wav_path, metadata, loudness, output_name, False, False, fmt)
+        for f in [temp_output, temp_cover]:
+            if f and Path(f).exists():
+                os.remove(f)
+        return False, None
+    
+    if cover_path and Path(cover_path).exists():
+        embed_success = embed_cover(temp_output, cover_path, output_name, fmt)
+        
+        if embed_success:
+            for f in [temp_output, temp_cover, cover_path]:
+                if f and f != cover_path and Path(f).exists():
+                    os.remove(f)
+            if cover_path == temp_cover and Path(temp_cover).exists():
+                os.remove(temp_cover)
+        else:
+            logger.warning(f"  Cover embedding failed, using raw file")
+            os.rename(temp_output, output_name)
+            if cover_path == temp_cover and Path(temp_cover).exists():
+                os.remove(temp_cover)
+    else:
+        os.rename(temp_output, output_name)
+    
+    valid, result = verify_output(output_name, fmt)
+    info = result if isinstance(result, dict) else {}
+    if valid:
+        logger.info(f"  SUCCESS: {output_name} ({fmt.upper()}: {info.get(fmt)}, Cover: {info.get('cover')})")
+        # Clean up temporary directory if it was created
+        if temp_dir and Path(temp_dir).exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        return True, output_name
+    else:
+        logger.error(f"  FAIL: Verification failed - {result}")
         save_result_json(wav_path, metadata, loudness, output_name, False, bool(info.get('cover')), fmt)
         # Clean up temporary directory if it was created
         if temp_dir and Path(temp_dir).exists():
@@ -1613,7 +1729,7 @@ def convert_batch(file_paths, fmt='mp3', parallel=True, max_workers=5):
             results.append(_convert_file_wrapper((wav_path, fmt)))
         return results
     
-    print(f"Converting {len(file_paths)} files in parallel (max {max_workers} workers)...")
+    logger.info(f"Converting {len(file_paths)} files in parallel (max {max_workers} workers)...")
     
     with ProcessPoolExecutor(max_workers=min(max_workers, len(file_paths))) as executor:
         futures = {executor.submit(_convert_file_wrapper, (fp, fmt)): fp for fp in file_paths}
@@ -1662,12 +1778,15 @@ Examples:
 
 
 if __name__ == '__main__':
+    # Configure logging to output to stdout with level and message
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+    
     args = parse_args()
     
     wav_files = [f for f in args.files if f.endswith('.wav') or f.endswith('.WAV')]
     
     if not wav_files:
-        print("Error: No WAV files found")
+        logger.error("Error: No WAV files found")
         sys.exit(1)
     
     if args.m4a:
@@ -1675,7 +1794,7 @@ if __name__ == '__main__':
     else:
         fmt = args.format
     
-    print(f"Output format: {fmt.upper()}")
+    logger.info(f"Output format: {fmt.upper()}")
     
     if len(wav_files) == 1:
         success, output = convert_file(wav_files[0], fmt)
@@ -1684,6 +1803,6 @@ if __name__ == '__main__':
     results = convert_batch(wav_files, fmt, parallel=(len(wav_files) >= 4), max_workers=args.max_workers)
     
     success_count = sum(1 for _, s, _ in results if s)
-    print(f"\nBatch complete: {success_count}/{len(results)} succeeded")
+    logger.info(f"\nBatch complete: {success_count}/{len(results)} succeeded")
     
     sys.exit(0 if success_count == len(results) else 1)
