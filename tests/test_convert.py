@@ -25,6 +25,7 @@ from convert import (
     lookup_online_metadata,
     run_cmd,
     convert_file,
+    search_soundcloud_web,
 )
 
 
@@ -946,6 +947,57 @@ class TestIntegration(unittest.TestCase):
             tags = data.get('format', {}).get('tags', {})
             self.assertEqual(tags.get('artist'), 'Test Artist M4A')
             self.assertEqual(tags.get('title'), 'Test Song M4A')
+
+
+class TestSoundCloudSearch(unittest.TestCase):
+    """Tests for SoundCloud search functionality."""
+    
+    @patch('convert._fetch_soundcloud_cover')
+    def test_search_soundcloud_web_basic(self, mock_fetch_cover):
+        """Test basic SoundCloud search with valid parameters."""
+        # Mock the cover fetch to return a test URL
+        mock_fetch_cover.return_value = "https://example.com/cover.jpg"
+        
+        # Call the function
+        result = search_soundcloud_web("Test Artist", "Test Song", "test.wav")
+        
+        # Verify we got a result
+        self.assertIsNotNone(result)
+        metadata, cover_url = result
+        self.assertIsNotNone(metadata)
+        self.assertEqual(metadata, ("Test Artist", "Test Song"))
+        self.assertEqual(cover_url, "https://example.com/cover.jpg")
+    
+    @patch('convert._fetch_soundcloud_cover')
+    def test_search_soundcloud_web_empty_params(self, mock_fetch_cover):
+        """Test SoundCloud search with empty parameters."""
+        result = search_soundcloud_web("", "", "")
+        self.assertIsNone(result[0])  # First element (metadata) should be None
+        self.assertIsNone(result[1])  # Second element (cover URL) should be None
+        
+        result = search_soundcloud_web(None, None, None)
+        self.assertIsNone(result[0])  # First element (metadata) should be None
+        self.assertIsNone(result[1])  # Second element (cover URL) should be None
+    
+    @patch('convert._fetch_soundcloud_cover')
+    def test_search_soundcloud_web_with_filename_handles(self, mock_fetch_cover):
+        """Test SoundCloud search extracts handles from filename."""
+        mock_fetch_cover.return_value = "https://example.com/cover.jpg"
+        
+        # Test with handle in filename
+        result = search_soundcloud_web("Artist", "Title", "[testhandle] Artist - Title.wav")
+        
+        # Should have attempted search with the handle
+        self.assertIsNotNone(result)
+    
+    @patch('convert._fetch_soundcloud_cover')
+    def test_search_soundcloud_web_no_results(self, mock_fetch_cover):
+        """Test SoundCloud search when no cover is found."""
+        mock_fetch_cover.return_value = None
+        
+        result = search_soundcloud_web("Unknown Artist", "Unknown Song", "unknown.wav")
+        self.assertIsNone(result[0])  # First element (metadata) should be None
+        self.assertIsNone(result[1])  # Second element (cover URL) should be None
 
 
 if __name__ == '__main__':
