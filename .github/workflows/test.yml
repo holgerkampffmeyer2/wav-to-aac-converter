@@ -24,6 +24,11 @@ jobs:
         python -m pip install --upgrade pip
         # Install any dependencies if needed (currently uses only standard library)
     
-    - name: Run tests
+    - name: Run tests with verbose output
       run: |
-        python -m unittest discover tests -v
+        python -m unittest discover tests -v 2>&1
+    
+    - name: Run tests again to check for flakiness
+      if: success()
+      run: |
+        python -m unittest discover tests -v 2>&1
