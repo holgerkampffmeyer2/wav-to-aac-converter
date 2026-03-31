@@ -904,7 +904,11 @@ class TestIntegration(unittest.TestCase):
                 # Debug output for CI failure investigation
                 if not success:
                     import sys as debug_sys
-                    print(f"DEBUG: Conversion failed. success={success}, output_file={output_file}", file=debug_sys.stderr)
+                    print(f"DEBUG: Conversion failed. success={success}, output_file={output_file}, wav_path={self.wav_path}", file=debug_sys.stderr)
+                    # Check what files exist
+                    import glob
+                    print(f"DEBUG: Files in test dir: {glob.glob(os.path.join(self.test_dir, '*'))}", file=debug_sys.stderr)
+                    print(f"DEBUG: Current dir mp3 files: {glob.glob('*.mp3')}", file=debug_sys.stderr)
 
                 # Check that the conversion succeeded
                 self.assertTrue(success, "Conversion should succeed")
@@ -956,7 +960,10 @@ class TestIntegration(unittest.TestCase):
                 # Debug output for CI failure investigation
                 if not success:
                     import sys as debug_sys
-                    print(f"DEBUG: Conversion failed. success={success}, output_file={output_file}", file=debug_sys.stderr)
+                    print(f"DEBUG: Conversion failed. success={success}, output_file={output_file}, wav_path={self.wav_path}", file=debug_sys.stderr)
+                    import glob
+                    print(f"DEBUG: Files in test dir: {glob.glob(os.path.join(self.test_dir, '*'))}", file=debug_sys.stderr)
+                    print(f"DEBUG: Current dir m4a files: {glob.glob('*.m4a')}", file=debug_sys.stderr)
 
                 self.assertTrue(success)
                 self.assertIsNotNone(output_file)
