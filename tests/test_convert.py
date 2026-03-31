@@ -903,10 +903,23 @@ class TestIntegration(unittest.TestCase):
 
                 # Debug output for CI failure investigation - print to stdout to ensure visibility
                 print(f"\n=== DEBUG MP3: success={success}, output_file={output_file}, wav_path={self.wav_path} ===", flush=True)
+                print(f"DEBUG: Current working directory: {os.getcwd()}", flush=True)
                 if not success:
                     import glob
                     print(f"DEBUG: Files in test dir: {glob.glob(os.path.join(self.test_dir, '*'))}", flush=True)
                     print(f"DEBUG: Current dir mp3 files: {glob.glob('*.mp3')}", flush=True)
+                    # Check for any leftover files that might indicate issues
+                    print(f"DEBUG: All files in current dir: {os.listdir('.')}", flush=True)
+                    # Test if ffmpeg can encode
+                    import subprocess
+                    test_cmd = f'ffmpeg -y -i \"{self.wav_path}\" -c:a libmp3lame -b:a 320k \"test_debug.mp3\" 2>&1'
+                    result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True)
+                    print(f"DEBUG: ffmpeg test returned: {result.returncode}", flush=True)
+                    if result.returncode != 0:
+                        print(f"DEBUG: ffmpeg stderr: {result.stderr[:500]}", flush=True)
+                    if os.path.exists('test_debug.mp3'):
+                        print(f"DEBUG: ffmpeg test created file", flush=True)
+                        os.remove('test_debug.mp3')
 
                 # Check that the conversion succeeded
                 self.assertTrue(success, "Conversion should succeed")
@@ -957,10 +970,22 @@ class TestIntegration(unittest.TestCase):
 
                 # Debug output for CI failure investigation - print to stdout to ensure visibility
                 print(f"\n=== DEBUG M4A: success={success}, output_file={output_file}, wav_path={self.wav_path} ===", flush=True)
+                print(f"DEBUG: Current working directory: {os.getcwd()}", flush=True)
                 if not success:
                     import glob
                     print(f"DEBUG: Files in test dir: {glob.glob(os.path.join(self.test_dir, '*'))}", flush=True)
                     print(f"DEBUG: Current dir m4a files: {glob.glob('*.m4a')}", flush=True)
+                    print(f"DEBUG: All files in current dir: {os.listdir('.')}", flush=True)
+                    # Test if ffmpeg can encode m4a
+                    import subprocess
+                    test_cmd = f'ffmpeg -y -i \"{self.wav_path}\" -c:a aac -b:a 320k \"test_debug.m4a\" 2>&1'
+                    result = subprocess.run(test_cmd, shell=True, capture_output=True, text=True)
+                    print(f"DEBUG: ffmpeg m4a test returned: {result.returncode}", flush=True)
+                    if result.returncode != 0:
+                        print(f"DEBUG: ffmpeg m4a stderr: {result.stderr[:500]}", flush=True)
+                    if os.path.exists('test_debug.m4a'):
+                        print(f"DEBUG: ffmpeg m4a test created file", flush=True)
+                        os.remove('test_debug.m4a')
 
                 self.assertTrue(success)
                 self.assertIsNotNone(output_file)
