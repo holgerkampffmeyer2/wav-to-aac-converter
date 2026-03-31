@@ -833,10 +833,6 @@ class TestIntegration(unittest.TestCase):
     """Integration tests for the conversion process."""
 
     def setUp(self):
-        # Clear debug log at start of each test
-        with open('/tmp/test_debug.log', 'w') as f:
-            f.write(f"=== Test {self._testMethodName} starting ===\n")
-        
         self.test_dir = tempfile.mkdtemp()
         self.wav_path = os.path.join(self.test_dir, "test.wav")
         # Create a silent WAV file (1 second, 44100 Hz, 16-bit mono)
@@ -878,7 +874,6 @@ class TestIntegration(unittest.TestCase):
     def test_integration_conversion_with_mocked_online(self, mock_loudness, mock_fetch):
         output_file = None
         try:
-            # Mock loudness analysis to return a fixed dict
             mock_loudness.return_value = {
                 'input_i': -16.0,
                 'input_tp': -1.0,
@@ -886,7 +881,6 @@ class TestIntegration(unittest.TestCase):
                 'input_thresh': -24.0
             }
 
-            # Mock fetch_url for online metadata lookup (iTunes) to return a known track
             mock_fetch.return_value = json.dumps({
                 "resultCount": 1,
                 "results": [{
@@ -896,33 +890,16 @@ class TestIntegration(unittest.TestCase):
                 }]
             })
 
-            # We also need to mock the cover art search to avoid network calls and return None (no cover)
-            # We can do this by patching the specific cover search functions.
             with patch('convert.search_deezer_cover', return_value=None), \
                  patch('convert.search_bandcamp_cover', return_value=None), \
                  patch('convert.search_soundcloud_web', return_value=(None, None)):
 
-                # Run the conversion - wrap in try/except to catch any exceptions
-                try:
-                    success, output_file = convert_file(self.wav_path, fmt='mp3')
-                except Exception as e:
-                    with open('/tmp/test_debug.log', 'a') as f:
-                        f.write(f"EXCEPTION: {type(e).__name__}: {e}\n")
-                        import traceback
-                        f.write(traceback.format_exc())
-                    success, output_file = False, None
+                success, output_file = convert_file(self.wav_path, fmt='mp3')
 
-                # Debug output for CI failure investigation - write to file
-                with open('/tmp/test_debug.log', 'a') as f:
-                    f.write(f"MP3: success={success}, output_file={output_file}, wav_path={self.wav_path}\n")
-                    f.write(f"MP3: cwd={os.getcwd()}\n")
-
-                # Check that the conversion succeeded
                 self.assertTrue(success, "Conversion should succeed")
                 self.assertIsNotNone(output_file, "Output file should be returned")
                 self.assertTrue(os.path.exists(output_file), f"Output file should exist: {output_file}")
 
-                # Check the output file's metadata using ffprobe
                 cmd = f'ffprobe -v quiet -print_format json -show_format -show_streams "{output_file}"'
                 success_cmd, stdout, _ = run_cmd(cmd)
                 self.assertTrue(success_cmd, "ffprobe should succeed")
@@ -931,7 +908,6 @@ class TestIntegration(unittest.TestCase):
                 self.assertEqual(tags.get('artist'), 'Test Artist')
                 self.assertEqual(tags.get('title'), 'Test Song')
         finally:
-            # Cleanup output file
             if output_file and os.path.exists(output_file):
                 try:
                     os.remove(output_file)
@@ -962,22 +938,7 @@ class TestIntegration(unittest.TestCase):
                  patch('convert.search_bandcamp_cover', return_value=None), \
                  patch('convert.search_soundcloud_web', return_value=(None, None)):
 
-                # Run the conversion - wrap in try/except to catch any exceptions
-                try:
-                    success, output_file = convert_file(self.wav_path, fmt='m4a')
-                except Exception as e:
-                    with open('/tmp/test_debug.log', 'a') as f:
-                        f.write(f"EXCEPTION: {type(e).__name__}: {e}\n")
-                        import traceback
-                        f.write(traceback.format_exc())
-                    success, output_file = False, None
-
-                # Debug output for CI failure investigation - write to file
-                with open('/tmp/test_debug.log', 'a') as f:
-                    f.write(f"M4A: success={success}, output_file={output_file}, wav_path={self.wav_path}\n")
-                    f.write(f"M4A: cwd={os.getcwd()}\n")
-
-                self.assertTrue(success)
+                success, output_file = convert_file(self.wav_path, fmt='m4a')
 
                 self.assertTrue(success)
                 self.assertIsNotNone(output_file)
@@ -991,7 +952,6 @@ class TestIntegration(unittest.TestCase):
                 self.assertEqual(tags.get('artist'), 'Test Artist M4A')
                 self.assertEqual(tags.get('title'), 'Test Song M4A')
         finally:
-            # Cleanup output file
             if output_file and os.path.exists(output_file):
                 try:
                     os.remove(output_file)

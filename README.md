@@ -1,9 +1,8 @@
 # wav-to-mp3-converter
 
 ![AI-Powered Audio Conversion](assets/ai-powered.png)
-![Test](https://github.com/holgerkampffmeyer2/wav-to-aac-converter/actions/workflows/test.yml/badge.svg)
 
-AI-agent driven WAV to MP3/M4A conversion with loudness normalization, metadata extraction, and cover art embedding. Designed to be controlled by AI coding assistants like [opencode](https://opencode.ai) or Claude Code.
+AI-agent driven WAV to MP3/M4A conversion with loudness normalization, metadata extraction, and cover art embedding.
 
 ## How It Works
 

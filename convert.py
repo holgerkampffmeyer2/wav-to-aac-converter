@@ -100,15 +100,12 @@ def to_ascii_filename(filename: str) -> str:
 
 def run_cmd(cmd: str, capture_output: bool = True, timeout: int = 600) -> Tuple[bool, str, str]:
     """Run shell command and return output."""
-    print(f"DEBUG run_cmd: executing: {cmd[:200]}...", flush=True)
     try:
         result = subprocess.run(
             cmd, shell=True, capture_output=capture_output, text=True, timeout=timeout
         )
-        print(f"DEBUG run_cmd: returncode={result.returncode}", flush=True)
         return result.returncode == 0, result.stdout, result.stderr
     except subprocess.TimeoutExpired:
-        print(f"DEBUG run_cmd: TIMEOUT", flush=True)
         return False, "", "Command timed out"
 
 
@@ -1216,9 +1213,7 @@ def encode_audio(wav_path, output_path, metadata, gain_db, fmt):
     if extra_args:
         cmd += f' {extra_args}'
     cmd += f' "{output_path}"'
-    print(f"DEBUG encode_audio: running cmd: {cmd}", flush=True)
-    success, stdout, stderr = run_cmd(cmd)
-    print(f"DEBUG encode_audio: success={success}, stderr={stderr[:200] if stderr else ''}", flush=True)
+    success, _, stderr = run_cmd(cmd)
     return success
 
 
