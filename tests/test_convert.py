@@ -901,6 +901,15 @@ class TestIntegration(unittest.TestCase):
                 # Run the conversion
                 success, output_file = convert_file(self.wav_path, fmt='mp3')
 
+                # Debug output for CI failure investigation
+                if not success:
+                    import sys as debug_sys
+                    print(f"DEBUG: Conversion failed. output_file={output_file}", file=debug_sys.stderr)
+                    if os.path.exists(output_file):
+                        print(f"DEBUG: Output file exists but success=False", file=debug_sys.stderr)
+                    else:
+                        print(f"DEBUG: Output file does NOT exist", file=debug_sys.stderr)
+
                 # Check that the conversion succeeded
                 self.assertTrue(success, "Conversion should succeed")
                 self.assertIsNotNone(output_file, "Output file should be returned")
@@ -947,6 +956,16 @@ class TestIntegration(unittest.TestCase):
                  patch('convert.search_soundcloud_web', return_value=(None, None)):
 
                 success, output_file = convert_file(self.wav_path, fmt='m4a')
+
+                # Debug output for CI failure investigation
+                if not success:
+                    import sys as debug_sys
+                    print(f"DEBUG: Conversion failed. output_file={output_file}", file=debug_sys.stderr)
+                    if output_file and os.path.exists(output_file):
+                        print(f"DEBUG: Output file exists but success=False", file=debug_sys.stderr)
+                    else:
+                        print(f"DEBUG: Output file does NOT exist", file=debug_sys.stderr)
+
                 self.assertTrue(success)
                 self.assertIsNotNone(output_file)
                 self.assertTrue(os.path.exists(output_file), f"Output file should exist: {output_file}")
