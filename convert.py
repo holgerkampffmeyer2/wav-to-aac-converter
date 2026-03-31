@@ -1213,7 +1213,9 @@ def encode_audio(wav_path, output_path, metadata, gain_db, fmt):
     if extra_args:
         cmd += f' {extra_args}'
     cmd += f' "{output_path}"'
-    success, _, stderr = run_cmd(cmd)
+    print(f"DEBUG encode_audio: running cmd: {cmd}", flush=True)
+    success, stdout, stderr = run_cmd(cmd)
+    print(f"DEBUG encode_audio: success={success}, stderr={stderr[:200] if stderr else ''}", flush=True)
     return success
 
 
