@@ -898,8 +898,14 @@ class TestIntegration(unittest.TestCase):
                  patch('convert.search_bandcamp_cover', return_value=None), \
                  patch('convert.search_soundcloud_web', return_value=(None, None)):
 
-                # Run the conversion
-                success, output_file = convert_file(self.wav_path, fmt='mp3')
+                # Run the conversion - wrap in try/except to catch any exceptions
+                try:
+                    success, output_file = convert_file(self.wav_path, fmt='mp3')
+                except Exception as e:
+                    print(f"\n=== EXCEPTION in convert_file: {type(e).__name__}: {e} ===", flush=True)
+                    import traceback
+                    print(f"DEBUG: {traceback.format_exc()}", flush=True)
+                    success, output_file = False, None
 
                 # Debug output for CI failure investigation - print to stdout to ensure visibility
                 print(f"\n=== DEBUG MP3: success={success}, output_file={output_file}, wav_path={self.wav_path} ===", flush=True)
@@ -966,7 +972,14 @@ class TestIntegration(unittest.TestCase):
                  patch('convert.search_bandcamp_cover', return_value=None), \
                  patch('convert.search_soundcloud_web', return_value=(None, None)):
 
-                success, output_file = convert_file(self.wav_path, fmt='m4a')
+                # Run the conversion - wrap in try/except to catch any exceptions
+                try:
+                    success, output_file = convert_file(self.wav_path, fmt='m4a')
+                except Exception as e:
+                    print(f"\n=== EXCEPTION in convert_file: {type(e).__name__}: {e} ===", flush=True)
+                    import traceback
+                    print(f"DEBUG: {traceback.format_exc()}", flush=True)
+                    success, output_file = False, None
 
                 # Debug output for CI failure investigation - print to stdout to ensure visibility
                 print(f"\n=== DEBUG M4A: success={success}, output_file={output_file}, wav_path={self.wav_path} ===", flush=True)
