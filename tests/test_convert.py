@@ -909,6 +909,7 @@ class TestIntegration(unittest.TestCase):
 
                 # Debug output for CI failure investigation - print to stdout to ensure visibility
                 print(f"\n=== DEBUG MP3: success={success}, output_file={output_file}, wav_path={self.wav_path} ===", flush=True)
+                print(f"DEBUG MP3: Current working directory: {os.getcwd()}", flush=True)
                 print(f"DEBUG: Current working directory: {os.getcwd()}", flush=True)
                 if not success:
                     import glob

@@ -100,12 +100,15 @@ def to_ascii_filename(filename: str) -> str:
 
 def run_cmd(cmd: str, capture_output: bool = True, timeout: int = 600) -> Tuple[bool, str, str]:
     """Run shell command and return output."""
+    print(f"DEBUG run_cmd: executing: {cmd[:200]}...", flush=True)
     try:
         result = subprocess.run(
             cmd, shell=True, capture_output=capture_output, text=True, timeout=timeout
         )
+        print(f"DEBUG run_cmd: returncode={result.returncode}", flush=True)
         return result.returncode == 0, result.stdout, result.stderr
     except subprocess.TimeoutExpired:
+        print(f"DEBUG run_cmd: TIMEOUT", flush=True)
         return False, "", "Command timed out"
 
 
