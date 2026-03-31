@@ -904,11 +904,7 @@ class TestIntegration(unittest.TestCase):
                 # Debug output for CI failure investigation
                 if not success:
                     import sys as debug_sys
-                    print(f"DEBUG: Conversion failed. output_file={output_file}", file=debug_sys.stderr)
-                    if os.path.exists(output_file):
-                        print(f"DEBUG: Output file exists but success=False", file=debug_sys.stderr)
-                    else:
-                        print(f"DEBUG: Output file does NOT exist", file=debug_sys.stderr)
+                    print(f"DEBUG: Conversion failed. success={success}, output_file={output_file}", file=debug_sys.stderr)
 
                 # Check that the conversion succeeded
                 self.assertTrue(success, "Conversion should succeed")
@@ -960,11 +956,7 @@ class TestIntegration(unittest.TestCase):
                 # Debug output for CI failure investigation
                 if not success:
                     import sys as debug_sys
-                    print(f"DEBUG: Conversion failed. output_file={output_file}", file=debug_sys.stderr)
-                    if output_file and os.path.exists(output_file):
-                        print(f"DEBUG: Output file exists but success=False", file=debug_sys.stderr)
-                    else:
-                        print(f"DEBUG: Output file does NOT exist", file=debug_sys.stderr)
+                    print(f"DEBUG: Conversion failed. success={success}, output_file={output_file}", file=debug_sys.stderr)
 
                 self.assertTrue(success)
                 self.assertIsNotNone(output_file)
