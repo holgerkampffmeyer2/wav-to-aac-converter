@@ -872,81 +872,99 @@ class TestIntegration(unittest.TestCase):
     @patch('convert.fetch_url')
     @patch('convert.analyze_loudness')
     def test_integration_conversion_with_mocked_online(self, mock_loudness, mock_fetch):
-        # Mock loudness analysis to return a fixed dict
-        mock_loudness.return_value = {
-            'input_i': -16.0,
-            'input_tp': -1.0,
-            'input_lra': 8.0,
-            'input_thresh': -24.0
-        }
+        output_file = None
+        try:
+            # Mock loudness analysis to return a fixed dict
+            mock_loudness.return_value = {
+                'input_i': -16.0,
+                'input_tp': -1.0,
+                'input_lra': 8.0,
+                'input_thresh': -24.0
+            }
 
-        # Mock fetch_url for online metadata lookup (iTunes) to return a known track
-        mock_fetch.return_value = json.dumps({
-            "resultCount": 1,
-            "results": [{
-                "trackName": "Test Song",
-                "artistName": "Test Artist",
-                "collectionName": "Test Album"
-            }]
-        })
+            # Mock fetch_url for online metadata lookup (iTunes) to return a known track
+            mock_fetch.return_value = json.dumps({
+                "resultCount": 1,
+                "results": [{
+                    "trackName": "Test Song",
+                    "artistName": "Test Artist",
+                    "collectionName": "Test Album"
+                }]
+            })
 
-        # We also need to mock the cover art search to avoid network calls and return None (no cover)
-        # We can do this by patching the specific cover search functions.
-        with patch('convert.search_deezer_cover', return_value=None), \
-             patch('convert.search_bandcamp_cover', return_value=None), \
-             patch('convert.search_soundcloud_web', return_value=(None, None)):
+            # We also need to mock the cover art search to avoid network calls and return None (no cover)
+            # We can do this by patching the specific cover search functions.
+            with patch('convert.search_deezer_cover', return_value=None), \
+                 patch('convert.search_bandcamp_cover', return_value=None), \
+                 patch('convert.search_soundcloud_web', return_value=(None, None)):
 
-            # Run the conversion
-            success, output_file = convert_file(self.wav_path, fmt='mp3')
+                # Run the conversion
+                success, output_file = convert_file(self.wav_path, fmt='mp3')
 
-            # Check that the conversion succeeded
-            self.assertTrue(success, "Conversion should succeed")
-            self.assertIsNotNone(output_file, "Output file should be returned")
-            self.assertTrue(os.path.exists(output_file), "Output file should exist")
+                # Check that the conversion succeeded
+                self.assertTrue(success, "Conversion should succeed")
+                self.assertIsNotNone(output_file, "Output file should be returned")
+                self.assertTrue(os.path.exists(output_file), f"Output file should exist: {output_file}")
 
-            # Check the output file's metadata using ffprobe
-            cmd = f'ffprobe -v quiet -print_format json -show_format -show_streams "{output_file}"'
-            success_cmd, stdout, _ = run_cmd(cmd)
-            self.assertTrue(success_cmd, "ffprobe should succeed")
-            data = json.loads(stdout)
-            tags = data.get('format', {}).get('tags', {})
-            self.assertEqual(tags.get('artist'), 'Test Artist')
-            self.assertEqual(tags.get('title'), 'Test Song')
+                # Check the output file's metadata using ffprobe
+                cmd = f'ffprobe -v quiet -print_format json -show_format -show_streams "{output_file}"'
+                success_cmd, stdout, _ = run_cmd(cmd)
+                self.assertTrue(success_cmd, "ffprobe should succeed")
+                data = json.loads(stdout)
+                tags = data.get('format', {}).get('tags', {})
+                self.assertEqual(tags.get('artist'), 'Test Artist')
+                self.assertEqual(tags.get('title'), 'Test Song')
+        finally:
+            # Cleanup output file
+            if output_file and os.path.exists(output_file):
+                try:
+                    os.remove(output_file)
+                except:
+                    pass
 
     @patch('convert.fetch_url')
     @patch('convert.analyze_loudness')
     def test_integration_conversion_m4a_with_mocked_online(self, mock_loudness, mock_fetch):
-        mock_loudness.return_value = {
-            'input_i': -16.0,
-            'input_tp': -1.0,
-            'input_lra': 8.0,
-            'input_thresh': -24.0
-        }
-        mock_fetch.return_value = json.dumps({
-            "resultCount": 1,
-            "results": [{
-                "trackName": "Test Song M4A",
-                "artistName": "Test Artist M4A",
-                "collectionName": "Test Album"
-            }]
-        })
+        output_file = None
+        try:
+            mock_loudness.return_value = {
+                'input_i': -16.0,
+                'input_tp': -1.0,
+                'input_lra': 8.0,
+                'input_thresh': -24.0
+            }
+            mock_fetch.return_value = json.dumps({
+                "resultCount": 1,
+                "results": [{
+                    "trackName": "Test Song M4A",
+                    "artistName": "Test Artist M4A",
+                    "collectionName": "Test Album"
+                }]
+            })
 
-        with patch('convert.search_deezer_cover', return_value=None), \
-             patch('convert.search_bandcamp_cover', return_value=None), \
-             patch('convert.search_soundcloud_web', return_value=(None, None)):
+            with patch('convert.search_deezer_cover', return_value=None), \
+                 patch('convert.search_bandcamp_cover', return_value=None), \
+                 patch('convert.search_soundcloud_web', return_value=(None, None)):
 
-            success, output_file = convert_file(self.wav_path, fmt='m4a')
-            self.assertTrue(success)
-            self.assertIsNotNone(output_file)
-            self.assertTrue(os.path.exists(output_file))
+                success, output_file = convert_file(self.wav_path, fmt='m4a')
+                self.assertTrue(success)
+                self.assertIsNotNone(output_file)
+                self.assertTrue(os.path.exists(output_file), f"Output file should exist: {output_file}")
 
-            cmd = f'ffprobe -v quiet -print_format json -show_format -show_streams "{output_file}"'
-            success_cmd, stdout, _ = run_cmd(cmd)
-            self.assertTrue(success_cmd)
-            data = json.loads(stdout)
-            tags = data.get('format', {}).get('tags', {})
-            self.assertEqual(tags.get('artist'), 'Test Artist M4A')
-            self.assertEqual(tags.get('title'), 'Test Song M4A')
+                cmd = f'ffprobe -v quiet -print_format json -show_format -show_streams "{output_file}"'
+                success_cmd, stdout, _ = run_cmd(cmd)
+                self.assertTrue(success_cmd)
+                data = json.loads(stdout)
+                tags = data.get('format', {}).get('tags', {})
+                self.assertEqual(tags.get('artist'), 'Test Artist M4A')
+                self.assertEqual(tags.get('title'), 'Test Song M4A')
+        finally:
+            # Cleanup output file
+            if output_file and os.path.exists(output_file):
+                try:
+                    os.remove(output_file)
+                except:
+                    pass
 
 
 class TestSoundCloudSearch(unittest.TestCase):
