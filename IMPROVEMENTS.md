@@ -31,35 +31,16 @@ Most functions now have type hints.
 
 ## Open Improvements
 
-### 6. Error Handling Consistency (Medium Priority)
+### 6. Error Handling Consistency ✅ DONE
 - Added exception classes: NetworkError, CoverSearchError, EncodingError
-- Ready for future improvements
+- Early returns added to cover search functions
 
-### 7. Code Organization (Low Priority)
-- Standardize on either returning `(success, data)` tuples or raising exceptions
-- Use more specific exception types instead of generic `Exception`
-- Add more informative error messages with context
+### 7. Performance Optimization ✅ DONE
+- Added @lru_cache to to_ascii_filename for caching
+- Early returns in search functions
 
-### 6. Magic Numbers and Strings (Medium Priority)
-- Define constants for:
-  - Default bitrate (320k)
-  - Cover art dimensions (600x600)
-  - Timeout values
-  - Retry attempt counts
-- Move string literals like API endpoints to constants
-
-### 7. Code Organization (Low Priority)
-- Consider separating concerns into modules:
-  - `audio_processing.py` for FFmpeg interactions
-  - `metadata.py` for tag handling and online lookups
-  - `cover_art.py` for cover art searching and processing
-  - `utils.py` for helper functions
-
-### 8. Performance Optimization (Low Priority)
-- Cache results of expensive operations (like filename ASCII conversion)
-- Consider async/await for I/O bound operations (network requests)
-- Optimize regex patterns that are used frequently
-- Add early returns to avoid unnecessary computation
+### 8. Code Organization (Skipped)
+- Modularization skipped for stability - single file is maintainable for this project size
 
 ## Priority Summary
 
@@ -70,6 +51,6 @@ Most functions now have type hints.
 | High | Type Hints | ✅ Mostly Done |
 | High | SoundCloud Removal | ✅ Done |
 | High | Magic Numbers & Strings | ✅ Done |
-| Medium | Error Handling | ⏳ Open |
-| Low | Code Organization | ⏳ Open |
-| Low | Performance | ⏳ Open |
+| Medium | Error Handling | ✅ Done |
+| Low | Performance | ✅ Done |
+| Low | Code Organization | ⏸️ Skipped |

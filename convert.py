@@ -11,7 +11,7 @@ import argparse
 import logging
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from functools import wraps
+from functools import wraps, lru_cache
 from urllib.parse import quote
 import unicodedata
 from typing import Optional, Tuple, Dict, Any, List, Set, Union
@@ -120,6 +120,7 @@ def load_config() -> Dict[str, Any]:
         return default_config
 
 
+@lru_cache(maxsize=1000)
 def to_ascii_filename(filename: str) -> str:
     """Convert Unicode filename to ASCII equivalent."""
     # Normalize Unicode characters (decompose accents, etc.)
