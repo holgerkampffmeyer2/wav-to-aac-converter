@@ -502,7 +502,8 @@ class TestConfigFeatures(unittest.TestCase):
                     "loudnorm": True,
                     "embed_cover": True,
                     "retry_attempts": 3,
-                    "timeout_seconds": 30
+                    "timeout_seconds": 30,
+                    "fuzzy_threshold": 0.8
                 }
                 self.assertEqual(config, expected)
 
@@ -691,11 +692,13 @@ class TestOnlineMetadataLookup(unittest.TestCase):
 
     @patch('utils.fetch_url')
     def test_lookup_online_metadata_fallback_to_musicbrainz(self, mock_fetch):
-        """If iTunes fails, fallback to MusicBrainz."""
+        """If iTunes fails, fallback to MusicBrainz via Bandcamp."""
         import json
+        # iTunes returns nothing, Bandcamp returns nothing, MusicBrainz has results
         mock_fetch.side_effect = [
-            json.dumps({"resultCount": 0}),
-            json.dumps({
+            json.dumps({"resultCount": 0}),  # iTunes
+            "",  # Bandcamp search
+            json.dumps({  # MusicBrainz
                 "recordings": [{
                     "title": "MB Song",
                     "releases": [{
@@ -710,9 +713,9 @@ class TestOnlineMetadataLookup(unittest.TestCase):
 
     @patch('utils.fetch_url')
     def test_lookup_online_metadata_both_fail(self, mock_fetch):
-        """Both iTunes and MusicBrainz fail."""
+        """All sources fail."""
         import json
-        mock_fetch.return_value = json.dumps({"resultCount": 0})
+        mock_fetch.return_value = ""  # All return empty
         artist, title = lookup_online_metadata("Unknown Song")
         self.assertIsNone(artist)
         self.assertIsNone(title)

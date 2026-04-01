@@ -4,12 +4,14 @@
 import json
 import logging
 from typing import Optional, Tuple, Dict, Any
+from difflib import SequenceMatcher
 
 from utils import (
     ITUNES_SEARCH_URL,
     MUSICBRAINZ_LOOKUP_URL,
     run_cmd as util_run_cmd,
-    to_ascii_filename
+    to_ascii_filename,
+    load_config
 )
 
 logger = logging.getLogger(__name__)
@@ -18,6 +20,64 @@ logger = logging.getLogger(__name__)
 def run_cmd(cmd: str, capture_output: bool = True, timeout: int = 600):
     """Run shell command and return output."""
     return util_run_cmd(cmd, capture_output, timeout)
+
+
+def _fuzzy_match(search_term: str, candidate: str, threshold: float = 0.8) -> bool:
+    """Check if search_term matches candidate with fuzzy matching.
+    
+    Args:
+        search_term: Term to search for
+        candidate: Candidate string to match against
+        threshold: Minimum similarity score (0-1)
+        
+    Returns:
+        True if match found above threshold
+    """
+    if not search_term or not candidate:
+        return False
+    
+    search_lower = search_term.lower().strip()
+    candidate_lower = candidate.lower().strip()
+    
+    # Exact match
+    if search_lower == candidate_lower:
+        return True
+    
+    # Partial match (one contains the other)
+    if search_lower in candidate_lower or candidate_lower in search_lower:
+        return True
+    
+    # Fuzzy match using SequenceMatcher
+    score = SequenceMatcher(None, search_lower, candidate_lower).ratio()
+    return score >= threshold
+
+
+def _find_best_match(search_terms: list, candidates: list, threshold: float = 0.8) -> Optional[tuple]:
+    """Find best match between search terms and candidates using fuzzy matching.
+    
+    Args:
+        search_terms: List of terms to search for
+        candidates: List of candidate strings
+        threshold: Minimum similarity score
+        
+    Returns:
+        Tuple of (best_candidate, best_score) or None
+    """
+    best_match = None
+    best_score = 0.0
+    
+    for term in search_terms:
+        for candidate in candidates:
+            score = SequenceMatcher(None, term.lower().strip(), candidate.lower().strip()).ratio()
+            if score > best_score:
+                best_score = score
+                best_match = candidate
+                if score == 1.0:  # Exact match, stop early
+                    return best_match, score
+    
+    if best_score >= threshold:
+        return best_match, best_score
+    return None
 
 
 def extract_metadata(wav_path: str) -> Dict[str, Any]:
@@ -47,35 +107,55 @@ def extract_metadata(wav_path: str) -> Dict[str, Any]:
 
 
 def _lookup_itunes(term: str):
-    """Lookup track on iTunes Search API."""
+    """Lookup track on iTunes Search API with fuzzy matching."""
     if not term:
         return None, None
+    
+    config = load_config()
+    threshold = config.get('fuzzy_threshold', 0.8)
     
     from utils import fetch_url
     from urllib.parse import quote
     
     term_quoted = quote(term)
-    url = f"{ITUNES_SEARCH_URL}{term_quoted}&entity=song&limit=5"
+    url = f"{ITUNES_SEARCH_URL}{term_quoted}&entity=song&limit=10"
     content = fetch_url(url)
     if not content:
         return None, None
     try:
         data = json.loads(content)
+        
+        # First try exact match
         for track in data.get("results", []):
             track_name = track.get("trackName", "")
             if track_name.lower() == term.lower():
                 artist = track.get("artistName")
                 return artist, track_name
-        # If no exact match, try to find a match containing the search term
-        term_lower = term.lower()
-        for track in data.get("results", []):
-            track_name = track.get("trackName", "").lower()
-            if term_lower in track_name or track_name in term_lower:
+        
+        # Try fuzzy matching against all track names
+        results = data.get("results", [])
+        if results:
+            # Create list of track names for matching
+            track_names = [t.get("trackName", "") for t in results if t.get("trackName")]
+            match = _find_best_match([term], track_names, threshold)
+            if match:
+                matched_track_name, score = match
+                # Find the full track info
+                for track in results:
+                    if track.get("trackName") == matched_track_name:
+                        return track.get("artistName"), matched_track_name
+            
+            # Fallback: take first result with both artist and track
+            for track in results:
                 artist = track.get("artistName")
-                return artist, track.get("trackName")
-        # If still no match, take the first result that has both artist and track name
-        if data.get("resultCount", 0):
-            track = data["results"][0]
+                track_name = track.get("trackName")
+                if artist and track_name:
+                    # Check if fuzzy matches
+                    if _fuzzy_match(term, track_name, threshold):
+                        return artist, track_name
+            
+            # Last resort: first result
+            track = results[0]
             artist = track.get("artistName")
             track_name = track.get("trackName")
             if artist and track_name:
@@ -127,15 +207,71 @@ def _lookup_musicbrainz(term: str):
     return None, None
 
 
+def _lookup_bandcamp(term: str):
+    """Lookup track on Bandcamp via web search."""
+    if not term:
+        return None, None
+    
+    from utils import fetch_url, clean_title_for_search
+    from urllib.parse import quote
+    
+    cleaned_term = clean_title_for_search(term)
+    if not cleaned_term:
+        cleaned_term = term
+    
+    search_url = f"https://bandcamp.com/search?q={quote(cleaned_term)}&search_type=title"
+    content = fetch_url(search_url)
+    if not content:
+        return None, None
+    
+    try:
+        from utils import BANDCAMP_URL_RE
+        match = BANDCAMP_URL_RE.search(content)
+        if match:
+            bandcamp_url = match.group(0).split('"')[0].split('&')[0]
+            page_content = fetch_url(bandcamp_url)
+            if page_content:
+                # Try to extract artist and title from page
+                import re
+                # Look for <title>Artist - Title | Bandcamp</title>
+                title_match = re.search(r'<title>([^-|]+)\s*-\s*([^|<]+)', page_content, re.IGNORECASE)
+                if title_match:
+                    artist = title_match.group(1).strip()
+                    title = title_match.group(2).strip()
+                    if artist and title:
+                        return artist, title
+    except Exception:
+        pass
+    return None, None
+
+
 def lookup_online_metadata(base_name: str):
-    """Look up metadata online using iTunes and MusicBrainz."""
+    """Look up metadata online using multiple sources.
+    
+    Search order (like cover art):
+    1. iTunes (primary - best for mainstream)
+    2. Bandcamp (great for remixes, indie)
+    3. MusicBrainz (fallback for obscure)
+    """
     # Try iTunes first
     artist, title = _lookup_itunes(base_name)
     if artist and title:
+        logger.debug(f"  iTunes found: {artist} - {title}")
         return artist, title
     
-    # Fallback to MusicBrainz
-    return _lookup_musicbrainz(base_name)
+    # Fallback to Bandcamp
+    artist, title = _lookup_bandcamp(base_name)
+    if artist and title:
+        logger.debug(f"  Bandcamp found: {artist} - {title}")
+        return artist, title
+    
+    # Last resort: MusicBrainz
+    artist, title = _lookup_musicbrainz(base_name)
+    if artist and title:
+        logger.debug(f"  MusicBrainz found: {artist} - {title}")
+        return artist, title
+    
+    return None, None
 
 
 def extract_metadata_from_filename(filename: str) -> Tuple[str, str]:
