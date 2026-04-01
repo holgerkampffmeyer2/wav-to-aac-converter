@@ -33,6 +33,42 @@ REMIX_KEYWORDS_RE = re.compile(
 )
 USER_AGENT = '"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"'
 
+# === Audio Settings ===
+DEFAULT_BITRATE = "320k"           # MP3/M4A bitrate
+COVER_DIMENSIONS = 600              # Cover art resize dimensions
+
+# === Timeouts (seconds) ===
+DEFAULT_TIMEOUT = 15               # fetch_url default
+SEARCH_TIMEOUT = 10                # API search timeouts
+ENCODE_TIMEOUT = 600               # FFmpeg encoding timeout
+LOUDNESS_TIMEOUT = 120             # Loudness analysis timeout
+
+# === Retry Settings ===
+RETRY_ATTEMPTS = 3                  # Default retry attempts
+RETRY_DELAY = 1                    # Initial retry delay (seconds)
+RETRY_BACKOFF = 2                  # Exponential backoff multiplier
+
+# === API Endpoints ===
+DEEZER_API_URL = "https://api.deezer.com/search/album?q="
+MUSICBRAINZ_SEARCH_URL = "https://musicbrainz.org/ws/2/release/"
+MUSICBRAINZ_COVER_URL = "https://coverartarchive.org/release/"
+BANDCAMP_SEARCH_URL = "https://bandcamp.com/search?q="
+ITUNES_SEARCH_URL = "https://itunes.apple.com/search?term="
+MUSICBRAINZ_LOOKUP_URL = "https://musicbrainz.org/ws/2/recording/?query="
+
+# === Exception Classes ===
+class NetworkError(Exception):
+    """Network-related errors."""
+    pass
+
+class CoverSearchError(Exception):
+    """Cover art search failures."""
+    pass
+
+class EncodingError(Exception):
+    """Audio encoding failures."""
+    pass
+
 
 def retry(max_attempts: int = 3, delay: int = 1, backoff: int = 2):
     """Retry decorator with exponential backoff for HTTP operations."""
@@ -96,7 +132,7 @@ def to_ascii_filename(filename: str) -> str:
     return ascii_only
 
 
-def run_cmd(cmd: str, capture_output: bool = True, timeout: int = 600) -> Tuple[bool, str, str]:
+def run_cmd(cmd: str, capture_output: bool = True, timeout: int = ENCODE_TIMEOUT) -> Tuple[bool, str, str]:
     """Run shell command and return output."""
     try:
         result = subprocess.run(
@@ -144,7 +180,7 @@ def extract_metadata(wav_path: str) -> Dict[str, Any]:
         return {}
 
 
-def fetch_url(url: str, timeout: int = 15, headers: Optional[Dict[str, str]] = None, method: str = 'GET', data: Optional[Dict[str, str]] = None) -> str:
+def fetch_url(url: str, timeout: int = DEFAULT_TIMEOUT, headers: Optional[Dict[str, str]] = None, method: str = 'GET', data: Optional[Dict[str, str]] = None) -> str:
     """Fetch URL content with configurable options.
     
     Args:
@@ -198,13 +234,13 @@ def fetch_url(url: str, timeout: int = 15, headers: Optional[Dict[str, str]] = N
     return stdout if success else ""
 
 
-@retry(max_attempts=3, delay=1, backoff=2)
+@retry(max_attempts=RETRY_ATTEMPTS, delay=RETRY_DELAY, backoff=RETRY_BACKOFF)
 def search_deezer_cover(artist: str, title: str) -> Optional[str]:
     """Search Deezer API for cover art."""
     if not artist and not title:
         return None
     query = f"{artist}+{title}".replace(' ', '+')
-    url = f"https://api.deezer.com/search/album?q={query}"
+    url = f"{DEEZER_API_URL}{query}"
     content = fetch_url(url)
     if not content:
         return None
@@ -223,8 +259,8 @@ def search_musicbrainz_cover(artist: str, title: str) -> Optional[str]:
         return None
     
     query = f'artist:"{artist}" AND recording:"{title}"'
-    search_url = f"https://musicbrainz.org/ws/2/release/?query={quote(query)}&fmt=json&limit=1"
-    content = fetch_url(search_url, timeout=10)
+    search_url = f"{MUSICBRAINZ_SEARCH_URL}?query={quote(query)}&fmt=json&limit=1"
+    content = fetch_url(search_url, timeout=SEARCH_TIMEOUT)
     if not content:
         return None
     
@@ -239,8 +275,8 @@ def search_musicbrainz_cover(artist: str, title: str) -> Optional[str]:
     except (json.JSONDecodeError, KeyError, IndexError):
         return None
     
-    cover_url = f"https://coverartarchive.org/release/{mbid}/front-500"
-    content = fetch_url(cover_url, timeout=10)
+    cover_url = f"{MUSICBRAINZ_COVER_URL}{mbid}/front-500"
+    content = fetch_url(cover_url, timeout=SEARCH_TIMEOUT)
     if not content:
         return None
     
@@ -250,7 +286,7 @@ def search_musicbrainz_cover(artist: str, title: str) -> Optional[str]:
     return None
 
 
-@retry(max_attempts=3, delay=1, backoff=2)
+@retry(max_attempts=RETRY_ATTEMPTS, delay=RETRY_DELAY, backoff=RETRY_BACKOFF)
 def search_bandcamp_cover(artist: str, title: str) -> Optional[str]:
     """Search Bandcamp for cover art via web search."""
     if not artist and not title:
@@ -258,7 +294,7 @@ def search_bandcamp_cover(artist: str, title: str) -> Optional[str]:
     query = f"{artist} {title}".strip()
     if not query:
         return None
-    search_url = f"https://bandcamp.com/search?q={query.replace(' ', '+')}"
+    search_url = f"{BANDCAMP_SEARCH_URL}{query.replace(' ', '+')}"
     content = fetch_url(search_url)
     if not content:
         return None
@@ -523,7 +559,7 @@ def download_cover(url, output_path):
 
 def process_cover(cover_path, output_path):
     """Process cover art to 600x600."""
-    cmd = f'ffmpeg -y -i "{cover_path}" -vf "scale=600:600:force_original_aspect_ratio=decrease,pad=600:600:(ow-iw)/2:(oh-ih)/2" -frames:v 1 -q:v 2 "{output_path}" 2>/dev/null'
+    cmd = f'ffmpeg -y -i "{cover_path}" -vf "scale={COVER_DIMENSIONS}:{COVER_DIMENSIONS}:force_original_aspect_ratio=decrease,pad={COVER_DIMENSIONS}:{COVER_DIMENSIONS}:(ow-iw)/2:(oh-ih)/2" -frames:v 1 -q:v 2 "{output_path}" 2>/dev/null'
     success, _, _ = run_cmd(cmd)
     return success
 
@@ -539,7 +575,7 @@ def encode_audio(wav_path, output_path, metadata, gain_db, fmt):
     else:
         raise ValueError(f"Unsupported format: {fmt}")
     
-    cmd = f'ffmpeg -y -i "{wav_path}" -map 0:a -af "volume={gain_db}dB" -c:a {codec} -b:a 320k'
+    cmd = f'ffmpeg -y -i "{wav_path}" -map 0:a -af "volume={gain_db}dB" -c:a {codec} -b:a {DEFAULT_BITRATE}'
     for key, value in metadata.items():
         if value and isinstance(value, str):
             cmd += f' -metadata {key}="{value}"'

@@ -23,11 +23,19 @@ Most functions now have type hints.
 ### 4. SoundCloud Removal ✅ DONE
 - Removed `search_soundcloud_web()` and all related functions (~220 lines)
 - Added MusicBrainz Cover Art API as replacement
-- Tests updated and cleaned up
+
+### 5. Magic Numbers & Strings ✅ DONE
+- Added constants for audio settings, timeouts, retry settings
+- Added API endpoint constants
+- Applied constants throughout convert.py
 
 ## Open Improvements
 
-### 5. Error Handling Consistency (Medium Priority)
+### 6. Error Handling Consistency (Medium Priority)
+- Added exception classes: NetworkError, CoverSearchError, EncodingError
+- Ready for future improvements
+
+### 7. Code Organization (Low Priority)
 - Standardize on either returning `(success, data)` tuples or raising exceptions
 - Use more specific exception types instead of generic `Exception`
 - Add more informative error messages with context
@@ -61,7 +69,7 @@ Most functions now have type hints.
 | High | Logging | ✅ Done |
 | High | Type Hints | ✅ Mostly Done |
 | High | SoundCloud Removal | ✅ Done |
+| High | Magic Numbers & Strings | ✅ Done |
 | Medium | Error Handling | ⏳ Open |
-| Medium | Magic Numbers | ⏳ Open |
 | Low | Code Organization | ⏳ Open |
 | Low | Performance | ⏳ Open |
