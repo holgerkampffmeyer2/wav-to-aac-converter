@@ -66,7 +66,14 @@ def _lookup_itunes(term: str):
             if track_name.lower() == term.lower():
                 artist = track.get("artistName")
                 return artist, track_name
-        # If no exact match, take the first result that has both artist and track name
+        # If no exact match, try to find a match containing the search term
+        term_lower = term.lower()
+        for track in data.get("results", []):
+            track_name = track.get("trackName", "").lower()
+            if term_lower in track_name or track_name in term_lower:
+                artist = track.get("artistName")
+                return artist, track.get("trackName")
+        # If still no match, take the first result that has both artist and track name
         if data.get("resultCount", 0):
             track = data["results"][0]
             artist = track.get("artistName")

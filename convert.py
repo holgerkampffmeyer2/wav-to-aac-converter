@@ -139,7 +139,7 @@ def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True) -> T
         search_artist = metadata.get('artist', '')
         search_title = metadata.get('title', '')
         
-        # Online lookup if missing
+        # Online lookup if missing tags only (not as fallback for filename)
         if not (search_artist and search_title):
             online_artist, online_title = lookup_online_metadata(base_name)
             if online_artist and online_title:
@@ -147,15 +147,15 @@ def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True) -> T
                 metadata['artist'] = search_artist
                 metadata['title'] = search_title
                 logger.info(f"  Metadata: found via online lookup → {search_artist} – {search_title}")
-            else:
-                artist, title = extract_metadata_from_filename(base_name)
-                if not search_artist:
-                    search_artist = artist
-                    metadata['artist'] = artist
-                if not search_title:
-                    search_title = title
-                    metadata['title'] = title
-                logger.info(f"  Metadata: derived from filename → {search_artist} – {search_title}")
+        
+        # Only use filename parsing if no metadata at all
+        if not search_artist and not search_title:
+            artist, title = extract_metadata_from_filename(base_name)
+            search_artist = artist
+            search_title = title
+            metadata['artist'] = artist
+            metadata['title'] = title
+            logger.info(f"  Metadata: derived from filename → {search_artist} – {search_title}")
         
         metadata = {k: v for k, v in metadata.items() if isinstance(v, str)}
         
