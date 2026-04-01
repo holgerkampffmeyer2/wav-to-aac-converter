@@ -965,13 +965,10 @@ class TestSoundCloudSearch(unittest.TestCase):
     @patch('convert._fetch_soundcloud_cover')
     def test_search_soundcloud_web_basic(self, mock_fetch_cover):
         """Test basic SoundCloud search with valid parameters."""
-        # Mock the cover fetch to return a test URL
         mock_fetch_cover.return_value = "https://example.com/cover.jpg"
         
-        # Call the function
         result = search_soundcloud_web("Test Artist", "Test Song", "test.wav")
         
-        # Verify we got a result
         self.assertIsNotNone(result)
         metadata, cover_url = result
         self.assertIsNotNone(metadata)
@@ -982,22 +979,20 @@ class TestSoundCloudSearch(unittest.TestCase):
     def test_search_soundcloud_web_empty_params(self, mock_fetch_cover):
         """Test SoundCloud search with empty parameters."""
         result = search_soundcloud_web("", "", "")
-        self.assertIsNone(result[0])  # First element (metadata) should be None
-        self.assertIsNone(result[1])  # Second element (cover URL) should be None
+        self.assertIsNone(result[0])
+        self.assertIsNone(result[1])
         
         result = search_soundcloud_web(None, None, None)
-        self.assertIsNone(result[0])  # First element (metadata) should be None
-        self.assertIsNone(result[1])  # Second element (cover URL) should be None
+        self.assertIsNone(result[0])
+        self.assertIsNone(result[1])
     
     @patch('convert._fetch_soundcloud_cover')
     def test_search_soundcloud_web_with_filename_handles(self, mock_fetch_cover):
         """Test SoundCloud search extracts handles from filename."""
         mock_fetch_cover.return_value = "https://example.com/cover.jpg"
         
-        # Test with handle in filename
         result = search_soundcloud_web("Artist", "Title", "[testhandle] Artist - Title.wav")
         
-        # Should have attempted search with the handle
         self.assertIsNotNone(result)
     
     @patch('convert._fetch_soundcloud_cover')
@@ -1006,8 +1001,46 @@ class TestSoundCloudSearch(unittest.TestCase):
         mock_fetch_cover.return_value = None
         
         result = search_soundcloud_web("Unknown Artist", "Unknown Song", "unknown.wav")
-        self.assertIsNone(result[0])  # First element (metadata) should be None
-        self.assertIsNone(result[1])  # Second element (cover URL) should be None
+        self.assertIsNone(result[0])
+        self.assertIsNone(result[1])
+
+    @patch('convert._fetch_soundcloud_cover')
+    def test_search_soundcloud_returns_early_on_first_match(self, mock_fetch_cover):
+        """Test that search returns immediately when cover is found."""
+        mock_fetch_cover.return_value = "https://example.com/cover.jpg"
+        
+        result = search_soundcloud_web("Artist", "Title", "Artist - Title.wav")
+        
+        self.assertIsNotNone(result)
+        mock_fetch_cover.assert_called()
+
+    @patch('convert._fetch_soundcloud_cover')
+    def test_search_soundcloud_no_handle_no_infinite_loop(self, mock_fetch_cover):
+        """Test no infinite loop when no handles are found."""
+        mock_fetch_cover.return_value = None
+        
+        result = search_soundcloud_web("", "", "No handles here.wav")
+        
+        self.assertIsNone(result[0])
+        self.assertIsNone(result[1])
+
+    @patch('convert.fetch_url')
+    def test_fetch_soundcloud_cover_returns_on_no_content(self, mock_fetch):
+        """Test _fetch_soundcloud_cover returns None when no content."""
+        from convert import _fetch_soundcloud_cover
+        mock_fetch.return_value = ""
+        
+        result = _fetch_soundcloud_cover("https://soundcloud.com/test/track")
+        self.assertIsNone(result)
+
+    @patch('convert.fetch_url')
+    def test_fetch_soundcloud_cover_parses_html(self, mock_fetch):
+        """Test _fetch_soundcloud_cover parses HTML for cover."""
+        from convert import _fetch_soundcloud_cover
+        mock_fetch.return_value = '<meta property="og:image" content="https://example.com/cover.jpg">'
+        
+        result = _fetch_soundcloud_cover("https://soundcloud.com/test/track")
+        self.assertEqual(result, "https://example.com/cover.jpg")
 
 
 class TestLoudnormFailure(unittest.TestCase):

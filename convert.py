@@ -370,6 +370,11 @@ def _search_soundcloud_with_components(
 ) -> Tuple[Optional[Tuple[str, str]], Optional[str]]:
     """Search SoundCloud via web for track info and cover art using prepared components."""
     searched: Set[str] = set()
+    max_urls = 20  # Limit to prevent long-running searches
+    
+    # If no handles, return early
+    if not all_handles:
+        return None, None
     
     # Try combinations of handles and track bases
     for handle in all_handles:
@@ -383,6 +388,8 @@ def _search_soundcloud_with_components(
             slug = MULTI_DASH_RE.sub('-', slug).strip('-')
             if slug and len(slug) >= 3:
                 for suffix in ['', '-free-download', '-free', '-download', '-dub', '-loud', '-master']:
+                    if len(searched) >= max_urls:
+                        break
                     sc_url: str = f"https://soundcloud.com/{handle}/{slug}{suffix}"
                     if sc_url not in searched:
                         searched.add(sc_url)
@@ -394,6 +401,8 @@ def _search_soundcloud_with_components(
             slug = MULTI_DASH_RE.sub('-', slug).strip('-')
             if slug and len(slug) >= 3:
                 for suffix in ['', '-free-download', '-free', '-download', '-dub', '-loud', '-master']:
+                    if len(searched) >= max_urls:
+                        break
                     sc_url: str = f"https://soundcloud.com/{handle}/{slug}{suffix}"
                     if sc_url not in searched:
                         searched.add(sc_url)
@@ -402,9 +411,13 @@ def _search_soundcloud_with_components(
                             return (artist, title), img_url
             # Try the original combinations for completeness
             for slug in [f"{artist_slug}-{track_base}-{handle}", f"{handle}-{track_base}", f"{track_base}-{handle}"]:
+                if len(searched) >= max_urls:
+                    break
                 slug: str = MULTI_DASH_RE.sub('-', slug).strip('-')
                 if slug and len(slug) >= 3:
                     for suffix in ['', '-free-download', '-free', '-download', '-dub', '-loud', '-master']:
+                        if len(searched) >= max_urls:
+                            break
                         sc_url: str = f"https://soundcloud.com/{handle}/{slug}{suffix}"
                         if sc_url not in searched:
                             searched.add(sc_url)
@@ -412,6 +425,8 @@ def _search_soundcloud_with_components(
                             if img_url:
                                 return (artist, title), img_url
         # Also try the handle alone (artist profile page) - though this is less likely to have cover art for a specific track
+        if len(searched) >= max_urls:
+            break
         sc_url: str = f"https://soundcloud.com/{handle}"
         if sc_url not in searched:
             searched.add(sc_url)
