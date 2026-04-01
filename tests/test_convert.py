@@ -13,19 +13,18 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from convert import (
     extract_metadata_from_filename,
-    extract_handles,
     clean_title_for_search,
     find_local_cover,
     OG_IMAGE_RE,
     BANDCAMP_URL_RE,
-    SNDCLOUD_ARTWORK_RE,
-    HANDLE_RE,
     _lookup_itunes,
     _lookup_musicbrainz,
     lookup_online_metadata,
     run_cmd,
     convert_file,
-    search_soundcloud_web,
+    search_deezer_cover,
+    search_musicbrainz_cover,
+    search_bandcamp_cover,
 )
 
 
@@ -73,57 +72,6 @@ class TestFilenameParsing(unittest.TestCase):
         artist, title = extract_metadata_from_filename("Artist - Song feat. Guest.wav")
         self.assertEqual(artist, "Artist")
         self.assertEqual(title, "Song feat. Guest")
-
-
-class TestHandleExtraction(unittest.TestCase):
-    """Tests for SoundCloud handle extraction from filenames."""
-
-    def test_simple_handle(self):
-        """Basic handle extraction."""
-        handles = extract_handles("Track [username].wav")
-        self.assertEqual(handles, ["username"])
-
-    def test_multiple_handles(self):
-        """Multiple handles in one filename."""
-        handles = extract_handles("Track [user1] [user2].wav")
-        self.assertIn("user1", handles)
-        self.assertIn("user2", handles)
-
-    def test_handle_case_insensitive(self):
-        """Handles should be case-insensitive."""
-        handles = extract_handles("Track [UPPERCASE].wav")
-        self.assertIn("uppercase", handles)
-
-    def test_handle_with_underscore(self):
-        """Handles with underscores."""
-        handles = extract_handles("Track [dj_user_123].wav")
-        self.assertIn("dj_user_123", handles)
-
-    def test_handle_with_numbers(self):
-        """Handles with numbers."""
-        handles = extract_handles("Track [djhulk1].wav")
-        self.assertIn("djhulk1", handles)
-
-    def test_handle_too_short(self):
-        """Handles under 3 chars are ignored."""
-        handles = extract_handles("Track [ab].wav")
-        self.assertNotIn("ab", handles)
-
-    def test_no_handle(self):
-        """No handle in filename."""
-        handles = extract_handles("Artist - Title.wav")
-        self.assertEqual(handles, [])
-
-    def test_handle_in_different_positions(self):
-        """Handle at start of filename."""
-        handles = extract_handles("[gsfreedls] Track Name.wav")
-        self.assertIn("gsfreedls", handles)
-
-    def test_handle_with_dash(self):
-        """Handle with dash - updated regex now includes dashes."""
-        handles = extract_handles("Track [user-name].wav")
-        self.assertNotIn("user", handles)
-        self.assertIn("user-name", handles)
 
 
 class TestTitleCleanup(unittest.TestCase):
@@ -206,31 +154,6 @@ class TestRegexConstants(unittest.TestCase):
         match = BANDCAMP_URL_RE.search(html)
         self.assertIsNone(match)
 
-    def test_soundcloud_artwork(self):
-        """SoundCloud artwork URL extraction."""
-        url = "https://i1.sndcdn.com/artworks-abc123-500x500.jpg"
-        match = SNDCLOUD_ARTWORK_RE.search(url)
-        self.assertIsNotNone(match)
-
-    def test_soundcloud_artwork_png(self):
-        """SoundCloud PNG artwork."""
-        url = "https://i1.sndcdn.com/artworks-abc123-500x500.png"
-        match = SNDCLOUD_ARTWORK_RE.search(url)
-        self.assertIsNotNone(match)
-
-    def test_handle_regex(self):
-        """Handle extraction regex."""
-        match = HANDLE_RE.search("Track [username].wav")
-        self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "username")
-
-    def test_handle_regex_case_insensitive(self):
-        """Handle regex is case insensitive - returns original case."""
-        match = HANDLE_RE.search("Track [USERNAME].wav")
-        self.assertIsNotNone(match)
-        self.assertEqual(match.group(1), "USERNAME")
-
-
 class TestCoverSearchLogic(unittest.TestCase):
     """Tests for cover search related functions."""
 
@@ -238,11 +161,6 @@ class TestCoverSearchLogic(unittest.TestCase):
         """Title cleanup for Deezer search."""
         title = clean_title_for_search("My Song (Radio Edit)")
         self.assertEqual(title, "My Song")
-
-    def test_handle_extraction_for_soundcloud(self):
-        """Extract handle for SC search."""
-        handles = extract_handles("My Song [gsfreedls].wav")
-        self.assertIn("gsfreedls", handles)
 
 
 class TestLocalCoverSearch(unittest.TestCase):
@@ -402,11 +320,6 @@ class TestEdgeCases(unittest.TestCase):
         self.assertEqual(artist, "Artist")
         self.assertIn("Track Name", title)
 
-    def test_handle_at_end_of_title(self):
-        """Handle in brackets at end of title (not after artist)."""
-        handles = extract_handles("The Martinez Brothers - Song EDIT [NPSM].wav")
-        self.assertIn("npsm", handles)
-
     def test_quotation_marks_in_title(self):
         """Quotation marks in title."""
         artist, title = extract_metadata_from_filename('Artist - "Kilo" (Remix).wav')
@@ -499,21 +412,21 @@ class TestASCIIFilenameHandling(unittest.TestCase):
     @patch('convert.analyze_loudness')
     @patch('convert.extract_metadata')
     @patch('convert.search_deezer_cover')
+    @patch('convert.search_musicbrainz_cover')
     @patch('convert.search_bandcamp_cover')
-    @patch('convert.search_soundcloud_web')
     @patch('convert.download_cover')
     @patch('convert.encode_audio')
     @patch('convert.embed_cover')
     @patch('convert.verify_output')
     @patch('shutil.rmtree')  # Don't actually delete temp dirs in test
-    def test_ascii_filename_used_for_unicode_input(self, mock_rmtree, mock_verify, mock_embed, mock_encode, mock_download, mock_soundcloud, mock_bandcamp, mock_deezer, mock_extract, mock_loudness):
+    def test_ascii_filename_used_for_unicode_input(self, mock_rmtree, mock_verify, mock_embed, mock_encode, mock_download, mock_musicbrainz, mock_bandcamp, mock_deezer, mock_extract, mock_loudness):
         """Test that ASCII filename is used when input has Unicode characters."""
         # Set up mocks to return successful results
         mock_loudness.return_value = {'input_i': '-9.00', 'input_tp': '1.01'}
         mock_extract.return_value = {'artist': 'Test Artist', 'title': 'Test Title'}
         mock_deezer.return_value = None
+        mock_musicbrainz.return_value = None
         mock_bandcamp.return_value = None
-        mock_soundcloud.return_value = (None, None)
         mock_download.return_value = True
         
         # Make encode_audio return True and also create the temp output file
@@ -891,8 +804,8 @@ class TestIntegration(unittest.TestCase):
             })
 
             with patch('convert.search_deezer_cover', return_value=None), \
-                 patch('convert.search_bandcamp_cover', return_value=None), \
-                 patch('convert.search_soundcloud_web', return_value=(None, None)):
+                 patch('convert.search_musicbrainz_cover', return_value=None), \
+                 patch('convert.search_bandcamp_cover', return_value=None):
 
                 success, output_file = convert_file(self.wav_path, fmt='mp3')
 
@@ -935,8 +848,8 @@ class TestIntegration(unittest.TestCase):
             })
 
             with patch('convert.search_deezer_cover', return_value=None), \
-                 patch('convert.search_bandcamp_cover', return_value=None), \
-                 patch('convert.search_soundcloud_web', return_value=(None, None)):
+                 patch('convert.search_musicbrainz_cover', return_value=None), \
+                 patch('convert.search_bandcamp_cover', return_value=None):
 
                 success, output_file = convert_file(self.wav_path, fmt='m4a')
 
@@ -957,90 +870,6 @@ class TestIntegration(unittest.TestCase):
                     os.remove(output_file)
                 except:
                     pass
-
-
-class TestSoundCloudSearch(unittest.TestCase):
-    """Tests for SoundCloud search functionality."""
-    
-    @patch('convert._fetch_soundcloud_cover')
-    def test_search_soundcloud_web_basic(self, mock_fetch_cover):
-        """Test basic SoundCloud search with valid parameters."""
-        mock_fetch_cover.return_value = "https://example.com/cover.jpg"
-        
-        result = search_soundcloud_web("Test Artist", "Test Song", "test.wav")
-        
-        self.assertIsNotNone(result)
-        metadata, cover_url = result
-        self.assertIsNotNone(metadata)
-        self.assertEqual(metadata, ("Test Artist", "Test Song"))
-        self.assertEqual(cover_url, "https://example.com/cover.jpg")
-    
-    @patch('convert._fetch_soundcloud_cover')
-    def test_search_soundcloud_web_empty_params(self, mock_fetch_cover):
-        """Test SoundCloud search with empty parameters."""
-        result = search_soundcloud_web("", "", "")
-        self.assertIsNone(result[0])
-        self.assertIsNone(result[1])
-        
-        result = search_soundcloud_web(None, None, None)
-        self.assertIsNone(result[0])
-        self.assertIsNone(result[1])
-    
-    @patch('convert._fetch_soundcloud_cover')
-    def test_search_soundcloud_web_with_filename_handles(self, mock_fetch_cover):
-        """Test SoundCloud search extracts handles from filename."""
-        mock_fetch_cover.return_value = "https://example.com/cover.jpg"
-        
-        result = search_soundcloud_web("Artist", "Title", "[testhandle] Artist - Title.wav")
-        
-        self.assertIsNotNone(result)
-    
-    @patch('convert._fetch_soundcloud_cover')
-    def test_search_soundcloud_web_no_results(self, mock_fetch_cover):
-        """Test SoundCloud search when no cover is found."""
-        mock_fetch_cover.return_value = None
-        
-        result = search_soundcloud_web("Unknown Artist", "Unknown Song", "unknown.wav")
-        self.assertIsNone(result[0])
-        self.assertIsNone(result[1])
-
-    @patch('convert._fetch_soundcloud_cover')
-    def test_search_soundcloud_returns_early_on_first_match(self, mock_fetch_cover):
-        """Test that search returns immediately when cover is found."""
-        mock_fetch_cover.return_value = "https://example.com/cover.jpg"
-        
-        result = search_soundcloud_web("Artist", "Title", "Artist - Title.wav")
-        
-        self.assertIsNotNone(result)
-        mock_fetch_cover.assert_called()
-
-    @patch('convert._fetch_soundcloud_cover')
-    def test_search_soundcloud_no_handle_no_infinite_loop(self, mock_fetch_cover):
-        """Test no infinite loop when no handles are found."""
-        mock_fetch_cover.return_value = None
-        
-        result = search_soundcloud_web("", "", "No handles here.wav")
-        
-        self.assertIsNone(result[0])
-        self.assertIsNone(result[1])
-
-    @patch('convert.fetch_url')
-    def test_fetch_soundcloud_cover_returns_on_no_content(self, mock_fetch):
-        """Test _fetch_soundcloud_cover returns None when no content."""
-        from convert import _fetch_soundcloud_cover
-        mock_fetch.return_value = ""
-        
-        result = _fetch_soundcloud_cover("https://soundcloud.com/test/track")
-        self.assertIsNone(result)
-
-    @patch('convert.fetch_url')
-    def test_fetch_soundcloud_cover_parses_html(self, mock_fetch):
-        """Test _fetch_soundcloud_cover parses HTML for cover."""
-        from convert import _fetch_soundcloud_cover
-        mock_fetch.return_value = '<meta property="og:image" content="https://example.com/cover.jpg">'
-        
-        result = _fetch_soundcloud_cover("https://soundcloud.com/test/track")
-        self.assertEqual(result, "https://example.com/cover.jpg")
 
 
 class TestLoudnormFailure(unittest.TestCase):
@@ -1106,8 +935,8 @@ class TestLoudnormFailure(unittest.TestCase):
         with patch('convert.extract_metadata', return_value={'artist': 'A', 'title': 'T'}), \
              patch('convert.find_local_cover', return_value=None), \
              patch('convert.search_deezer_cover', return_value=None), \
+             patch('convert.search_musicbrainz_cover', return_value=None), \
              patch('convert.search_bandcamp_cover', return_value=None), \
-             patch('convert.search_soundcloud_web', return_value=(None, None)), \
              patch('convert.download_cover', return_value=False), \
              patch('convert.embed_cover', return_value=True), \
              patch('convert.verify_output', return_value=(True, {'mp3': True, 'cover': False})):
@@ -1350,30 +1179,6 @@ class TestBatchProcessing(unittest.TestCase):
         self.assertTrue(results[0][1])
         self.assertFalse(results[1][1])
         self.assertTrue(results[2][1])
-
-
-class TestEmptyHandleEdgeCases(unittest.TestCase):
-    """Tests for empty handle edge cases."""
-
-    def test_empty_brackets(self):
-        """Handle with just spaces."""
-        handles = extract_handles("Track [  ].wav")
-        self.assertEqual(handles, [])
-
-    def test_only_brackets_no_content(self):
-        """Handle with empty brackets."""
-        handles = extract_handles("Track [].wav")
-        self.assertEqual(handles, [])
-
-    def test_single_character_handle(self):
-        """Single character handle (too short)."""
-        handles = extract_handles("Track [a].wav")
-        self.assertEqual(handles, [])
-
-    def test_whitespace_only_handle(self):
-        """Handle with leading/trailing whitespace is extracted."""
-        handles = extract_handles("Track [   abc   ].wav")
-        self.assertIn("   abc   ", handles)
 
 
 class TestEmbeddedWAVMetadata(unittest.TestCase):

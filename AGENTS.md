@@ -67,7 +67,7 @@ Note: Filename processing uses ASCII-converted versions to ensure compatibility 
 ### Cover Artwork Strategy
 1. **Source file**: Check for embedded cover in WAV
 2. **Local folder**: Look for `cover.png`, `cover.jpg`, or matching image files
-3. **Web search**: Deezer → Bandcamp → SoundCloud
+3. **Web search**: Deezer → MusicBrainz → Bandcamp
 
 ### Batch Processing
 - **Auto-detected**: 4+ files trigger parallel mode

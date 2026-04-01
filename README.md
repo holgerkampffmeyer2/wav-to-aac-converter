@@ -136,7 +136,7 @@ sudo apt install ffmpeg python3
 
 1. **Source file**: Extract embedded cover from WAV
 2. **Local folder**: Look for `cover.png`, `cover.jpg`, or matching image files
-3. **Web search**: Deezer → Bandcamp → SoundCloud
+3. **Web search**: Deezer → MusicBrainz → Bandcamp
 
 ## File Structure
 
