@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""Audio processing functions (FFmpeg, encoding, loudness) for wav-to-aac-converter."""
+
+import subprocess
+import logging
+from typing import Optional, Dict, Any, Tuple
+
+from utils import (
+    ENCODE_TIMEOUT,
+    DEFAULT_BITRATE,
+    COVER_DIMENSIONS,
+    run_cmd as util_run_cmd,
+    to_ascii_filename
+)
+
+logger = logging.getLogger(__name__)
+
+
+def run_cmd(cmd: str, capture_output: bool = True, timeout: int = ENCODE_TIMEOUT) -> Tuple[bool, str, str]:
+    """Run shell command and return output."""
+    return util_run_cmd(cmd, capture_output, timeout)
+
+
+def analyze_loudness(wav_path: str) -> Optional[Dict[str, Any]]:
+    """Analyze loudness of WAV file using first 5 minutes for speed."""
+    cmd = f'ffmpeg -t 300 -i "{wav_path}" -af loudnorm=print_format=json -f null - 2>&1'
+    success, stdout, stderr = run_cmd(cmd)
+    if not success:
+        return None
+    output = stdout + stderr
+    try:
+        start = output.index('{')
+        end = output.rindex('}') + 1
+        data = output[start:end]
+        import json
+        return json.loads(data)
+    except (ValueError, json.JSONDecodeError) as e:
+        logger.warning(f"Loudness analysis parse error: {e}")
+        return None
+
+
+def encode_audio(wav_path: str, output_path: str, metadata: Dict[str, Any], gain_db: float, fmt: str) -> bool:
+    """Encode WAV to MP3/M4A with metadata."""
+    if fmt == 'mp3':
+        codec = 'libmp3lame'
+        extra_args = ''
+    elif fmt == 'm4a':
+        codec = 'aac'
+        extra_args = '-movflags +use_metadata_tags'
+    else:
+        raise ValueError(f"Unsupported format: {fmt}")
+    
+    cmd = f'ffmpeg -y -i "{wav_path}" -map 0:a -af "volume={gain_db}dB" -c:a {codec} -b:a {DEFAULT_BITRATE}'
+    for key, value in metadata.items():
+        if value and isinstance(value, str):
+            cmd += f' -metadata {key}="{value}"'
+    if extra_args:
+        cmd += f' {extra_args}'
+    cmd += f' "{output_path}"'
+    success, _, stderr = run_cmd(cmd)
+    return success
+
+
+def process_cover(cover_path: str, output_path: str) -> bool:
+    """Process cover art to 600x600."""
+    cmd = f'ffmpeg -y -i "{cover_path}" -vf "scale={COVER_DIMENSIONS}:{COVER_DIMENSIONS}:force_original_aspect_ratio=decrease,pad={COVER_DIMENSIONS}:{COVER_DIMENSIONS}:(ow-iw)/2:(oh-ih)/2" -frames:v 1 -q:v 2 "{output_path}" 2>/dev/null'
+    success, _, _ = run_cmd(cmd)
+    return success
+
+
+def embed_cover(input_path: str, cover_path: str, final_path: str, fmt: str) -> bool:
+    """Embed cover art into audio file."""
+    if fmt == 'mp3':
+        cmd = f'ffmpeg -y -i "{input_path}" -i "{cover_path}" -map 0:a -map 1:v -c copy -id3v2_version 3 -metadata:s:v title="Album cover" -metadata:s:v comment="Cover (front)" "{final_path}" 2>/dev/null'
+    elif fmt == 'm4a':
+        cmd = f'ffmpeg -y -i "{input_path}" -i "{cover_path}" -map 0:a -map 1:v -c copy -movflags +use_metadata_tags -metadata:s:v title="Album cover" -metadata:s:v comment="Cover (front)" "{final_path}" 2>/dev/null'
+    else:
+        return False
+    
+    success, _, _ = run_cmd(cmd)
+    return success
+
+
+def find_local_cover(wav_path: str) -> Optional[str]:
+    """Find cover art in local folder."""
+    from pathlib import Path
+    
+    wav_dir = Path(wav_path).parent
+    wav_stem = Path(wav_path).stem
+    
+    # Check for cover.png, cover.jpg, or matching filename
+    for ext in ['.png', '.jpg', '.jpeg']:
+        # cover.png/jpg
+        cover_path = wav_dir / f"cover{ext}"
+        if cover_path.exists():
+            return str(cover_path)
+        
+        # [filename].png/jpg
+        named_cover = wav_dir / f"{wav_stem}{ext}"
+        if named_cover.exists():
+            return str(named_cover)
+    
+    # Fallback: find any image in folder
+    for ext in ['.png', '.jpg', '.jpeg']:
+        for img_file in wav_dir.glob(f"*{ext}"):
+            if img_file.is_file():
+                return str(img_file)
+    
+    return None
+
+
+def download_cover(url: str, output_path: str) -> bool:
+    """Download cover art from URL."""
+    from utils import fetch_url
+    
+    content = fetch_url(url)
+    if not content:
+        return False
+    
+    try:
+        with open(output_path, 'wb') as f:
+            f.write(content.encode('utf-8') if isinstance(content, str) else content)
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to save cover: {e}")
+        return False
