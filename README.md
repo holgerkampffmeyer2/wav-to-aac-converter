@@ -33,7 +33,8 @@ The converter can be configured using a `config.json` file in the same directory
   "loudnorm": true,
   "embed_cover": true,
   "retry_attempts": 3,
-  "timeout_seconds": 30
+  "timeout_seconds": 30,
+  "fuzzy_threshold": 0.8
 }
 ```
 
@@ -44,6 +45,7 @@ The converter can be configured using a `config.json` file in the same directory
 - `embed_cover`: Embed cover art (default: true)
 - `retry_attempts`: Retry attempts for failed operations (default: 3)
 - `timeout_seconds`: Timeout in seconds for operations (default: 30)
+- `fuzzy_threshold`: Similarity threshold for fuzzy matching (0.0-1.0, default: 0.8)
 
 Note: Unicode filename to ASCII conversion is now automatic and always applied to ensure compatibility with audio processing tools.
 
@@ -136,7 +138,7 @@ sudo apt install ffmpeg python3
 
 1. **Source file**: Extract embedded cover from WAV
 2. **Local folder**: Look for `cover.png`, `cover.jpg`, or matching image files
-3. **Web search**: Deezer → MusicBrainz → Bandcamp
+3. **Web search**: Deezer (with fuzzy matching) → Bandcamp → MusicBrainz
 
 ## File Structure
 

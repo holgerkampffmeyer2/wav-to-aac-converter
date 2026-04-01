@@ -241,12 +241,12 @@ def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True) -> T
             logger.info(f"  Embedding cover: {cover_path}")
             try:
                 embed_success = audio_embed_cover(temp_output, cover_path, output_name, fmt)
-                logger.info(f"  Embed result: {embed_result}, type: {type(embed_result)}")
+                logger.info(f"  Embed result: {embed_success}, type: {type(embed_success)}")
             except Exception as e:
                 logger.error(f"  Embed exception: {e}")
-                embed_result = False
+                embed_success = False
             
-            if embed_result:
+            if embed_success:
                 for f in [temp_output, temp_cover, cover_path]:
                     if f and f != cover_path and Path(f).exists():
                         os.remove(f)
