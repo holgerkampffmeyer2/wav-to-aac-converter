@@ -152,6 +152,16 @@ wav-to-mp3-converter/
 └── *.mp3 / *.m4a      # Converted output
 ```
 
+## Testing
+
+```bash
+# Run all tests
+python3 -m unittest tests.test_convert
+
+# Run with verbose output
+python3 -m unittest tests.test_convert -v
+```
+
 ## For AI Agents
 
 See [AGENTS.md](AGENTS.md) for complete workflow instructions including:

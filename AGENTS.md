@@ -135,3 +135,28 @@ sudo apt install ffmpeg python3
 - **Cover Sources**: Source → Local folder → Deezer → Bandcamp → SoundCloud
 - **Retry Logic**: 3 attempts with exponential backoff
 - **Metadata Sources**: WAV tags → iTunes → MusicBrainz → filename parsing
+
+## Testing
+
+```bash
+# Run all tests
+python3 -m unittest tests.test_convert
+
+# Run specific test class
+python3 -m unittest tests.test_convert.TestFilenameParsing
+
+# Run with verbose output
+python3 -m unittest tests.test_convert -v
+```
+
+### Test Coverage
+
+The test suite covers:
+- Filename parsing (artist/title extraction)
+- Handle extraction for SoundCloud
+- Metadata lookup (iTunes, MusicBrainz)
+- Cover art search (Deezer, Bandcamp, local files)
+- Loudness analysis and error handling
+- Encoding and verification
+- Batch processing (parallel/sequential)
+- Edge cases (Unicode, special characters, empty values)

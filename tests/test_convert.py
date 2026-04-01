@@ -1010,5 +1010,408 @@ class TestSoundCloudSearch(unittest.TestCase):
         self.assertIsNone(result[1])  # Second element (cover URL) should be None
 
 
+class TestLoudnormFailure(unittest.TestCase):
+    """Tests for loudnorm failure handling."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.wav_path = os.path.join(self.test_dir, "test.wav")
+        import struct
+        sample_rate = 44100
+        duration = 1
+        num_samples = sample_rate * duration
+        bytes_per_sample = 2
+        num_channels = 1
+        byte_rate = sample_rate * num_channels * bytes_per_sample
+        block_align = num_channels * bytes_per_sample
+        data_size = num_samples * num_channels * bytes_per_sample
+        chunk_size = 36 + data_size
+
+        with open(self.wav_path, 'wb') as f:
+            f.write(b'RIFF')
+            f.write(struct.pack('<I', chunk_size))
+            f.write(b'WAVE')
+            f.write(b'fmt ')
+            f.write(struct.pack('<I', 16))
+            f.write(struct.pack('<H', 1))
+            f.write(struct.pack('<H', num_channels))
+            f.write(struct.pack('<I', sample_rate))
+            f.write(struct.pack('<I', byte_rate))
+            f.write(struct.pack('<H', block_align))
+            f.write(struct.pack('<H', bytes_per_sample * 8))
+            f.write(b'data')
+            f.write(struct.pack('<I', data_size))
+            f.write(b'\x00' * data_size)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.test_dir)
+
+    @patch('convert.run_cmd')
+    def test_loudnorm_failure_returns_none(self, mock_run_cmd):
+        """Test that loudnorm failure returns None."""
+        from convert import analyze_loudness
+        mock_run_cmd.return_value = (False, "", "ffmpeg error")
+        result = analyze_loudness(self.wav_path)
+        self.assertIsNone(result)
+
+    @patch('convert.run_cmd')
+    def test_loudnorm_invalid_json_returns_none(self, mock_run_cmd):
+        """Test that invalid JSON from loudnorm returns None."""
+        from convert import analyze_loudness
+        mock_run_cmd.return_value = (True, "not json output", "")
+        result = analyze_loudness(self.wav_path)
+        self.assertIsNone(result)
+
+    @patch('convert.analyze_loudness')
+    @patch('convert.run_cmd')
+    def test_conversion_returns_false_on_loudnorm_failure(self, mock_run_cmd, mock_loudness):
+        """Test conversion returns False when loudnorm fails."""
+        from convert import convert_file
+        mock_loudness.return_value = None  # Loudnorm fails
+        
+        with patch('convert.extract_metadata', return_value={'artist': 'A', 'title': 'T'}), \
+             patch('convert.find_local_cover', return_value=None), \
+             patch('convert.search_deezer_cover', return_value=None), \
+             patch('convert.search_bandcamp_cover', return_value=None), \
+             patch('convert.search_soundcloud_web', return_value=(None, None)), \
+             patch('convert.download_cover', return_value=False), \
+             patch('convert.embed_cover', return_value=True), \
+             patch('convert.verify_output', return_value=(True, {'mp3': True, 'cover': False})):
+
+            success, output = convert_file(self.wav_path, fmt='mp3')
+            
+            # Should return False because loudness analysis failed
+            self.assertFalse(success)
+
+
+class TestAPIErrorHandling(unittest.TestCase):
+    """Tests for API error handling (rate limits, network errors)."""
+
+    @patch('convert.fetch_url')
+    def test_deezer_network_error_returns_none(self, mock_fetch):
+        """Test returns None when network error occurs."""
+        from convert import search_deezer_cover
+        mock_fetch.side_effect = Exception("Network error")
+        
+        result = search_deezer_cover("Test Artist", "Test Song")
+        self.assertIsNone(result)
+
+    @patch('convert.fetch_url')
+    def test_deezer_invalid_json_returns_none(self, mock_fetch):
+        """Test returns None when response is invalid JSON."""
+        from convert import search_deezer_cover
+        mock_fetch.return_value = "not valid json"
+        
+        result = search_deezer_cover("Test Artist", "Test Song")
+        self.assertIsNone(result)
+
+    @patch('convert.fetch_url')
+    def test_deezer_empty_response_returns_none(self, mock_fetch):
+        """Test returns None when response is empty."""
+        from convert import search_deezer_cover
+        mock_fetch.return_value = ""
+        
+        result = search_deezer_cover("Test Artist", "Test Song")
+        self.assertIsNone(result)
+
+    @patch('convert.fetch_url')
+    def test_bandcamp_network_error_returns_none(self, mock_fetch):
+        """Test Bandcamp returns None on network error."""
+        from convert import search_bandcamp_cover
+        mock_fetch.side_effect = Exception("Connection refused")
+        
+        result = search_bandcamp_cover("Test Artist", "Test Song")
+        self.assertIsNone(result)
+
+    @patch('convert.fetch_url')
+    def test_itunes_network_error_returns_none(self, mock_fetch):
+        """Test iTunes returns None on network error."""
+        mock_fetch.return_value = ""  # fetch_url returns "" on network error
+        
+        artist, title = _lookup_itunes("Test Song")
+        self.assertIsNone(artist)
+        self.assertIsNone(title)
+
+    @patch('convert.fetch_url')
+    def test_musicbrainz_network_error_returns_none(self, mock_fetch):
+        """Test MusicBrainz returns None on network error."""
+        mock_fetch.return_value = ""  # fetch_url returns "" on network error
+        
+        artist, title = _lookup_musicbrainz("Test Song")
+        self.assertIsNone(artist)
+        self.assertIsNone(title)
+
+
+class TestEncodingErrors(unittest.TestCase):
+    """Tests for encoding error handling."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+        self.wav_path = os.path.join(self.test_dir, "test.wav")
+        import struct
+        sample_rate = 44100
+        duration = 1
+        num_samples = sample_rate * duration
+        bytes_per_sample = 2
+        num_channels = 1
+        byte_rate = sample_rate * num_channels * bytes_per_sample
+        block_align = num_channels * bytes_per_sample
+        data_size = num_samples * num_channels * bytes_per_sample
+        chunk_size = 36 + data_size
+
+        with open(self.wav_path, 'wb') as f:
+            f.write(b'RIFF')
+            f.write(struct.pack('<I', chunk_size))
+            f.write(b'WAVE')
+            f.write(b'fmt ')
+            f.write(struct.pack('<I', 16))
+            f.write(struct.pack('<H', 1))
+            f.write(struct.pack('<H', num_channels))
+            f.write(struct.pack('<I', sample_rate))
+            f.write(struct.pack('<I', byte_rate))
+            f.write(struct.pack('<H', block_align))
+            f.write(struct.pack('<H', bytes_per_sample * 8))
+            f.write(b'data')
+            f.write(struct.pack('<I', data_size))
+            f.write(b'\x00' * data_size)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.test_dir)
+
+    @patch('convert.run_cmd')
+    def test_encode_audio_failure_returns_false(self, mock_run_cmd):
+        """Test encoding failure returns False."""
+        from convert import encode_audio
+        output_path = os.path.join(self.test_dir, "output.mp3")
+        mock_run_cmd.return_value = (False, "", "Encoding failed")
+        
+        result = encode_audio(self.wav_path, output_path, {'artist': 'A', 'title': 'T'}, -3.0, 'mp3')
+        self.assertFalse(result)
+
+    @patch('convert.run_cmd')
+    def test_corrupted_wav_returns_error(self, mock_run_cmd):
+        """Test corrupted WAV file handling."""
+        from convert import analyze_loudness
+        corrupted_wav = os.path.join(self.test_dir, "corrupted.wav")
+        with open(corrupted_wav, 'wb') as f:
+            f.write(b'RIFF' + b'\x00' * 100)  # Invalid WAV
+        
+        mock_run_cmd.return_value = (False, "", "Invalid data")
+        
+        result = analyze_loudness(corrupted_wav)
+        self.assertIsNone(result)
+
+
+class TestVerifyOutput(unittest.TestCase):
+    """Tests for output verification."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.test_dir)
+
+    @patch('convert.run_cmd')
+    def test_verify_output_missing_file(self, mock_run_cmd):
+        """Test verification fails for missing file."""
+        from convert import verify_output
+        mock_run_cmd.return_value = (False, "", "File not found")
+        
+        result, details = verify_output("/nonexistent/file.mp3", "mp3")
+        self.assertFalse(result)
+
+    @patch('convert.run_cmd')
+    def test_verify_output_wrong_codec(self, mock_run_cmd):
+        """Test verification fails for wrong codec."""
+        from convert import verify_output
+        output_path = os.path.join(self.test_dir, "output.mp3")
+        
+        # ffprobe returns aac codec instead of mp3
+        mock_run_cmd.return_value = (True, "codec_name=aac", "")
+        
+        result, details = verify_output(output_path, "mp3")
+        # Result is True but codec check shows False
+        self.assertFalse(details['mp3'])
+
+    @patch('convert.run_cmd')
+    def test_verify_output_correct_codec(self, mock_run_cmd):
+        """Test verification passes for correct codec."""
+        from convert import verify_output
+        output_path = os.path.join(self.test_dir, "output.mp3")
+        
+        mock_run_cmd.return_value = (True, "codec_name=mp3", "")
+        
+        result, details = verify_output(output_path, "mp3")
+        self.assertTrue(result)
+        self.assertTrue(details['mp3'])
+
+    @patch('convert.run_cmd')
+    def test_verify_output_no_cover(self, mock_run_cmd):
+        """Test verification passes when no cover but codec is correct."""
+        from convert import verify_output
+        output_path = os.path.join(self.test_dir, "output.mp3")
+        
+        mock_run_cmd.return_value = (True, "codec_name=mp3", "")
+        
+        result, details = verify_output(output_path, "mp3")
+        self.assertTrue(result)
+        self.assertFalse(details['cover'])
+
+    @patch('convert.run_cmd')
+    def test_verify_output_with_cover(self, mock_run_cmd):
+        """Test verification passes when cover is embedded."""
+        from convert import verify_output
+        output_path = os.path.join(self.test_dir, "output.mp3")
+        
+        mock_run_cmd.return_value = (True, "codec_name=mp3\nattached_pic=1", "")
+        
+        result, details = verify_output(output_path, "mp3")
+        self.assertTrue(result)
+        self.assertTrue(details['cover'])
+
+
+class TestBatchProcessing(unittest.TestCase):
+    """Tests for batch processing."""
+
+    @patch('convert.convert_file')
+    def test_batch_parallel_4_files(self, mock_convert):
+        """Test parallel processing activates for 4+ files."""
+        from convert import convert_batch
+        mock_convert.return_value = (True, "output.mp3")
+        
+        file_paths = [f"file{i}.wav" for i in range(4)]
+        results = convert_batch(file_paths, 'mp3', parallel=True, max_workers=5)
+        
+        self.assertEqual(len(results), 4)
+
+    @patch('convert.convert_file')
+    def test_batch_sequential_3_files(self, mock_convert):
+        """Test sequential processing for <4 files."""
+        from convert import convert_batch
+        mock_convert.return_value = (True, "output.mp3")
+        
+        file_paths = [f"file{i}.wav" for i in range(3)]
+        results = convert_batch(file_paths, 'mp3', parallel=False, max_workers=5)
+        
+        self.assertEqual(len(results), 3)
+
+    @patch('convert.convert_file')
+    def test_batch_continues_on_single_failure(self, mock_convert):
+        """Test batch continues processing when one file fails."""
+        from convert import convert_batch
+        
+        def side_effect(path, fmt):
+            if "fail" in path:
+                return (False, None)
+            return (True, "output.mp3")
+        
+        mock_convert.side_effect = side_effect
+        
+        file_paths = ["file1.wav", "fail.wav", "file3.wav"]
+        results = convert_batch(file_paths, 'mp3', parallel=False, max_workers=5)
+        
+        self.assertEqual(len(results), 3)
+        self.assertTrue(results[0][1])
+        self.assertFalse(results[1][1])
+        self.assertTrue(results[2][1])
+
+
+class TestEmptyHandleEdgeCases(unittest.TestCase):
+    """Tests for empty handle edge cases."""
+
+    def test_empty_brackets(self):
+        """Handle with just spaces."""
+        handles = extract_handles("Track [  ].wav")
+        self.assertEqual(handles, [])
+
+    def test_only_brackets_no_content(self):
+        """Handle with empty brackets."""
+        handles = extract_handles("Track [].wav")
+        self.assertEqual(handles, [])
+
+    def test_single_character_handle(self):
+        """Single character handle (too short)."""
+        handles = extract_handles("Track [a].wav")
+        self.assertEqual(handles, [])
+
+    def test_whitespace_only_handle(self):
+        """Handle with leading/trailing whitespace is extracted."""
+        handles = extract_handles("Track [   abc   ].wav")
+        self.assertIn("   abc   ", handles)
+
+
+class TestEmbeddedWAVMetadata(unittest.TestCase):
+    """Tests for embedded metadata in WAV files."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.test_dir)
+
+    @patch('convert.run_cmd')
+    def test_extract_embedded_metadata(self, mock_run_cmd):
+        """Test extraction of embedded metadata from WAV."""
+        from convert import extract_metadata
+        wav_path = os.path.join(self.test_dir, "test.wav")
+        
+        with open(wav_path, 'wb') as f:
+            f.write(b'RIFF' + b'\x00' * 100)
+        
+        mock_run_cmd.return_value = (True, json.dumps({
+            "format": {
+                "tags": {
+                    "artist": "Embedded Artist",
+                    "title": "Embedded Title",
+                    "album": "Test Album"
+                },
+                "duration": 180.0
+            }
+        }), "")
+        
+        metadata = extract_metadata(wav_path)
+        self.assertEqual(metadata['artist'], "Embedded Artist")
+        self.assertEqual(metadata['title'], "Embedded Title")
+        self.assertEqual(metadata['album'], "Test Album")
+
+    @patch('convert.run_cmd')
+    def test_extract_metadata_empty_tags(self, mock_run_cmd):
+        """Test extraction when tags are empty."""
+        from convert import extract_metadata
+        wav_path = os.path.join(self.test_dir, "test.wav")
+        
+        with open(wav_path, 'wb') as f:
+            f.write(b'RIFF' + b'\x00' * 100)
+        
+        mock_run_cmd.return_value = (True, json.dumps({
+            "format": {
+                "tags": {},
+                "duration": 0.0
+            }
+        }), "")
+        
+        metadata = extract_metadata(wav_path)
+        self.assertEqual(metadata['artist'], '')
+        self.assertEqual(metadata['title'], '')
+
+    @patch('convert.run_cmd')
+    def test_extract_metadata_ffprobe_fails(self, mock_run_cmd):
+        """Test extraction when ffprobe fails."""
+        from convert import extract_metadata
+        wav_path = os.path.join(self.test_dir, "test.wav")
+        
+        with open(wav_path, 'wb') as f:
+            f.write(b'RIFF' + b'\x00' * 100)
+        
+        mock_run_cmd.return_value = (False, "", "ffprobe error")
+        
+        metadata = extract_metadata(wav_path)
+        self.assertEqual(metadata, {})
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
