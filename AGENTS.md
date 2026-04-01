@@ -153,10 +153,10 @@ python3 -m unittest tests.test_convert -v
 
 The test suite covers:
 - Filename parsing (artist/title extraction)
-- Handle extraction for SoundCloud
 - Metadata lookup (iTunes, MusicBrainz)
-- Cover art search (Deezer, Bandcamp, local files)
+- Cover art search (Deezer, MusicBrainz, Bandcamp, local files)
 - Loudness analysis and error handling
 - Encoding and verification
 - Batch processing (parallel/sequential)
+- Edge cases (Unicode, special characters, empty values)
 - Edge cases (Unicode, special characters, empty values)
