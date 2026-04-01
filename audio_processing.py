@@ -3,6 +3,7 @@
 
 import subprocess
 import logging
+from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 
 from utils import (
@@ -70,6 +71,7 @@ def process_cover(cover_path: str, output_path: str) -> bool:
 
 def embed_cover(input_path: str, cover_path: str, final_path: str, fmt: str) -> bool:
     """Embed cover art into audio file."""
+    logger.info(f"embed_cover called: input={input_path}, cover={cover_path}, final={final_path}, fmt={fmt}")
     if fmt == 'mp3':
         cmd = f'ffmpeg -y -i "{input_path}" -i "{cover_path}" -map 0:a -map 1:v -c copy -id3v2_version 3 -metadata:s:v title="Album cover" -metadata:s:v comment="Cover (front)" "{final_path}" 2>/dev/null'
     elif fmt == 'm4a':
@@ -77,7 +79,13 @@ def embed_cover(input_path: str, cover_path: str, final_path: str, fmt: str) -> 
     else:
         return False
     
-    success, _, _ = run_cmd(cmd)
+    logger.info(f"Running embed command: {cmd[:100]}...")
+    result = run_cmd(cmd)
+    logger.info(f"run_cmd result: {result}, type: {type(result)}")
+    
+    success, stdout, stderr = result
+    logger.info(f"success: {success}, stdout: {stdout[:100] if stdout else 'empty'}, stderr: {stderr[:100] if stderr else 'empty'}")
+    
     return success
 
 
@@ -110,17 +118,7 @@ def find_local_cover(wav_path: str) -> Optional[str]:
 
 
 def download_cover(url: str, output_path: str) -> bool:
-    """Download cover art from URL."""
-    from utils import fetch_url
-    
-    content = fetch_url(url)
-    if not content:
-        return False
-    
-    try:
-        with open(output_path, 'wb') as f:
-            f.write(content.encode('utf-8') if isinstance(content, str) else content)
-        return True
-    except Exception as e:
-        logger.warning(f"Failed to save cover: {e}")
-        return False
+    """Download cover art from URL using curl for binary data."""
+    cmd = f'curl -sL -m 30 -o "{output_path}" "{url}"'
+    success, _, _ = run_cmd(cmd)
+    return success and Path(output_path).exists()

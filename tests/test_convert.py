@@ -951,11 +951,11 @@ class TestLoudnormFailure(unittest.TestCase):
         
         with patch('convert.extract_metadata', return_value={'artist': 'A', 'title': 'T'}), \
              patch('convert.find_local_cover', return_value=None), \
-             patch('convert.search_deezer_cover', return_value=None), \
-             patch('convert.search_musicbrainz_cover', return_value=None), \
-             patch('convert.search_bandcamp_cover', return_value=None), \
-             patch('convert.download_cover', return_value=False), \
-             patch('convert.embed_cover', return_value=True), \
+             patch('cover_art.search_deezer_cover', return_value=None), \
+             patch('cover_art.search_musicbrainz_cover', return_value=None), \
+             patch('cover_art.search_bandcamp_cover', return_value=None), \
+             patch('audio_processing.download_cover', return_value=False), \
+             patch('audio_processing.embed_cover', return_value=True), \
              patch('convert.verify_output', return_value=(True, {'mp3': True, 'cover': False})):
 
             success, output = convert_file(self.wav_path, fmt='mp3')

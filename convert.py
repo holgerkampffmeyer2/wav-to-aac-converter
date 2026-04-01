@@ -30,7 +30,7 @@ from audio_processing import (
     analyze_loudness,
     encode_audio,
     process_cover,
-    embed_cover,
+    embed_cover as audio_embed_cover,
     find_local_cover,
     download_cover,
     run_cmd as audio_run_cmd
@@ -139,22 +139,33 @@ def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True) -> T
         search_artist = metadata.get('artist', '')
         search_title = metadata.get('title', '')
         
+        # Get raw filename-derived metadata BEFORE any cleaning
+        raw_artist, raw_title = extract_metadata_from_filename(base_name)
+        
         # Online lookup if missing tags only (not as fallback for filename)
         if not (search_artist and search_title):
             online_artist, online_title = lookup_online_metadata(base_name)
             if online_artist and online_title:
-                search_artist, search_title = online_artist, online_title
+                # Prefer filename metadata if it contains more info (e.g., remix)
+                if raw_title:
+                    # If filename has more info (e.g., "(Remix)"), use that
+                    if '(' in raw_title or '[' in raw_title:
+                        search_title = raw_title
+                    else:
+                        search_title = online_title
+                else:
+                    search_title = online_title
+                search_artist = online_artist
                 metadata['artist'] = search_artist
                 metadata['title'] = search_title
                 logger.info(f"  Metadata: found via online lookup → {search_artist} – {search_title}")
         
         # Only use filename parsing if no metadata at all
         if not search_artist and not search_title:
-            artist, title = extract_metadata_from_filename(base_name)
-            search_artist = artist
-            search_title = title
-            metadata['artist'] = artist
-            metadata['title'] = title
+            search_artist = raw_artist
+            search_title = raw_title
+            metadata['artist'] = raw_artist
+            metadata['title'] = raw_title
             logger.info(f"  Metadata: derived from filename → {search_artist} – {search_title}")
         
         metadata = {k: v for k, v in metadata.items() if isinstance(v, str)}
@@ -190,19 +201,32 @@ def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True) -> T
                         cover_path = local_cover
                     logger.info(f"  Cover: Found local file")
                 else:
+                    # Try cover search with cleaned title first, then fallback to full title
                     search_title_clean = clean_title_for_search(search_title)
                     
-                    cover_url = search_deezer_cover(search_artist, search_title_clean)
-                    if cover_url:
-                        download_cover(cover_url, temp_cover)
-                        logger.info(f"  Cover: Downloaded from Deezer")
-                    elif search_artist or search_title:
-                        cover_url = search_musicbrainz_cover(search_artist, search_title_clean)
+                    # Try with cleaned title first
+                    if search_title_clean and search_title_clean != search_title:
+                        cover_url = search_deezer_cover(search_artist, search_title_clean)
+                        if cover_url:
+                            download_cover(cover_url, temp_cover)
+                            logger.info(f"  Cover: Downloaded from Deezer")
+                    
+                    # If no cover, try with full title
+                    if not Path(temp_cover).exists() and search_title:
+                        cover_url = search_deezer_cover(search_artist, search_title)
+                        if cover_url:
+                            download_cover(cover_url, temp_cover)
+                            logger.info(f"  Cover: Downloaded from Deezer (full title)")
+                    
+                    if not Path(temp_cover).exists() and (search_artist or search_title):
+                        search_for = search_title_clean if search_title_clean else search_title
+                        cover_url = search_musicbrainz_cover(search_artist, search_for)
                         if cover_url:
                             download_cover(cover_url, temp_cover)
                             logger.info(f"  Cover: Downloaded from MusicBrainz")
-                        else:
-                            cover_url = search_bandcamp_cover(search_artist, search_title_clean)
+                        
+                        if not Path(temp_cover).exists():
+                            cover_url = search_bandcamp_cover(search_artist, search_for)
                             if cover_url:
                                 download_cover(cover_url, temp_cover)
                                 logger.info(f"  Cover: Downloaded from Bandcamp")
@@ -214,9 +238,15 @@ def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True) -> T
         
         # Step 3: Embed cover
         if cover_path and Path(cover_path).exists():
-            embed_success = embed_cover(temp_output, cover_path, output_name, fmt)
+            logger.info(f"  Embedding cover: {cover_path}")
+            try:
+                embed_success = audio_embed_cover(temp_output, cover_path, output_name, fmt)
+                logger.info(f"  Embed result: {embed_result}, type: {type(embed_result)}")
+            except Exception as e:
+                logger.error(f"  Embed exception: {e}")
+                embed_result = False
             
-            if embed_success:
+            if embed_result:
                 for f in [temp_output, temp_cover, cover_path]:
                     if f and f != cover_path and Path(f).exists():
                         os.remove(f)
@@ -294,7 +324,7 @@ def parse_args():
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+    logging.basicConfig(level=logging.DEBUG, format='%(levelname)s: %(message)s')
     
     args = parse_args()
     

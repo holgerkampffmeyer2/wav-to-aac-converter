@@ -27,12 +27,34 @@ logger = logging.getLogger(__name__)
 
 @retry(max_attempts=RETRY_ATTEMPTS, delay=RETRY_DELAY, backoff=RETRY_BACKOFF)
 def search_deezer_cover(artist: str, title: str) -> Optional[str]:
-    """Search Deezer API for cover art."""
+    """Search Deezer API for cover art using track search."""
     if not artist and not title:
         return None
+    
+    # Try track search first (better for getting actual track cover)
     query = f"{artist}+{title}".replace(' ', '+')
+    url = f"https://api.deezer.com/search/track?q={quote(query)}&limit=5"
+    content = fetch_url(url, timeout=SEARCH_TIMEOUT)
+    if not content:
+        return None
+    try:
+        data = json.loads(content)
+        if data.get('data') and len(data['data']) > 0:
+            # Get cover from track's album
+            for track in data['data']:
+                album = track.get('album')
+                if album:
+                    cover = album.get('cover_big') or album.get('cover_medium') or album.get('cover_small')
+                    if cover:
+                        return cover
+            # Fallback: get any cover from results
+            return data['data'][0].get('album', {}).get('cover_big')
+    except json.JSONDecodeError:
+        pass
+    
+    # Fallback: try album search
     url = f"{DEEZER_API_URL}{query}"
-    content = fetch_url(url)
+    content = fetch_url(url, timeout=SEARCH_TIMEOUT)
     if not content:
         return None
     try:
