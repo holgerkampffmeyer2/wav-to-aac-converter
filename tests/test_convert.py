@@ -728,18 +728,18 @@ class TestConfigFeatures(unittest.TestCase):
         with patch('convert.convert_file', return_value=(True, 'output.wav')) as mock_convert:
             file_paths = ['file1.wav', 'file2.wav']
             # Test that convert_batch works without ascii_filename parameter
-            results = convert_batch(file_paths, 'mp3', True, 2)
+            results = convert_batch(file_paths, 'mp3', True, 2, embed_cover=True)
             # Check that convert_file was called for each file
-            mock_convert.assert_any_call('file1.wav', 'mp3')
-            mock_convert.assert_any_call('file2.wav', 'mp3')
+            mock_convert.assert_any_call('file1.wav', 'mp3', True)
+            mock_convert.assert_any_call('file2.wav', 'mp3', True)
             
             # Reset mock
             mock_convert.reset_mock()
             
             # Test with parallel=False
-            results = convert_batch(file_paths, 'mp3', False, 2)
-            mock_convert.assert_any_call('file1.wav', 'mp3')
-            mock_convert.assert_any_call('file2.wav', 'mp3')
+            results = convert_batch(file_paths, 'mp3', False, 2, embed_cover=True)
+            mock_convert.assert_any_call('file1.wav', 'mp3', True)
+            mock_convert.assert_any_call('file2.wav', 'mp3', True)
 
 
 class TestOnlineMetadataLookup(unittest.TestCase):
@@ -1316,7 +1316,7 @@ class TestBatchProcessing(unittest.TestCase):
         mock_convert.return_value = (True, "output.mp3")
         
         file_paths = [f"file{i}.wav" for i in range(4)]
-        results = convert_batch(file_paths, 'mp3', parallel=True, max_workers=5)
+        results = convert_batch(file_paths, 'mp3', parallel=True, max_workers=5, embed_cover=True)
         
         self.assertEqual(len(results), 4)
 
@@ -1327,7 +1327,7 @@ class TestBatchProcessing(unittest.TestCase):
         mock_convert.return_value = (True, "output.mp3")
         
         file_paths = [f"file{i}.wav" for i in range(3)]
-        results = convert_batch(file_paths, 'mp3', parallel=False, max_workers=5)
+        results = convert_batch(file_paths, 'mp3', parallel=False, max_workers=5, embed_cover=True)
         
         self.assertEqual(len(results), 3)
 
@@ -1336,7 +1336,7 @@ class TestBatchProcessing(unittest.TestCase):
         """Test batch continues processing when one file fails."""
         from convert import convert_batch
         
-        def side_effect(path, fmt):
+        def side_effect(path, fmt, embed_cover):
             if "fail" in path:
                 return (False, None)
             return (True, "output.mp3")
@@ -1344,7 +1344,7 @@ class TestBatchProcessing(unittest.TestCase):
         mock_convert.side_effect = side_effect
         
         file_paths = ["file1.wav", "fail.wav", "file3.wav"]
-        results = convert_batch(file_paths, 'mp3', parallel=False, max_workers=5)
+        results = convert_batch(file_paths, 'mp3', parallel=False, max_workers=5, embed_cover=True)
         
         self.assertEqual(len(results), 3)
         self.assertTrue(results[0][1])

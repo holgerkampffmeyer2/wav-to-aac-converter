@@ -370,7 +370,7 @@ def _search_soundcloud_with_components(
 ) -> Tuple[Optional[Tuple[str, str]], Optional[str]]:
     """Search SoundCloud via web for track info and cover art using prepared components."""
     searched: Set[str] = set()
-    max_urls = 20  # Limit to prevent long-running searches
+    max_urls = 50  # Increased limit to search more combinations
     
     # If no handles, return early
     if not all_handles:
@@ -445,7 +445,38 @@ def search_soundcloud_web(artist: str, title: str, filename: str = "") -> Tuple[
     # Extract and prepare search components
     filename_handles = extract_handles(filename or "")
     artist_handles = _generate_soundcloud_handles_from_artist(artist)
-    all_handles: List[str] = list(set(filename_handles + artist_handles))
+    
+    # Also try to extract potential handles from remix/featured artist names in brackets
+    remix_handles = []
+    remix_suffix = ""  # Track suffix from bracketed content (e.g., "jay-phoenix")
+    if filename:
+        # First try to match with spaces (e.g., "Jay Phoenix Remix")
+        bracket_matches = re.findall(r'[\(\[]([a-zA-Z0-9\s]+)[\)\]]', filename)
+        # If no match, try with underscores (e.g., "Jay_Phoenix_Remix")
+        if not bracket_matches:
+            bracket_matches = re.findall(r'[\(\[]([a-zA-Z0-9_]+)[\)\]]', filename)
+        
+        for match in bracket_matches:
+            # Clean and process the bracketed text
+            clean_match = match.lower()
+            # Remove common remix/edit keywords but keep them for suffix
+            original_match = clean_match
+            for kw in ['remix', 'edit', 'mix', 'version', 'radio', 'original', 'free', 'download']:
+                clean_match = re.sub(rf'\b{kw}\b', '', clean_match)
+            clean_match = clean_match.strip()
+            
+            # Create suffix for track slug (e.g., "jay-phoenix")
+            suffix = clean_match.replace(' ', '-').replace('_', '-')
+            if suffix and len(suffix) >= 3:
+                remix_suffix = suffix
+            
+            if clean_match and len(clean_match) >= 3:
+                # Try common handle formations
+                remix_handles.append(clean_match.replace(' ', '').replace('_', ''))  # concatenated
+                remix_handles.append(clean_match.replace(' ', '-').replace('_', '-'))  # hyphenated
+                remix_handles.append(clean_match.replace(' ', '_'))  # underscore
+    
+    all_handles: List[str] = list(set(filename_handles + artist_handles + remix_handles))
     
     # Clean title for search: remove filename handles and bracketed content
     cleaned_title: str = title
@@ -472,6 +503,10 @@ def search_soundcloud_web(artist: str, title: str, filename: str = "") -> Tuple[
         track_bases_to_try.add(track_base_from_title)
     if track_base_from_filename:
         track_bases_to_try.add(track_base_from_filename)
+    
+    # Add track base with remix suffix (e.g., "gbp-jay-phoenix")
+    if remix_suffix and track_base_from_title:
+        track_bases_to_try.add(f"{track_base_from_title}-{remix_suffix}")
     
     artist_slug: str = artist.lower().replace(' ', '-') if artist else ''
     
@@ -1276,7 +1311,7 @@ def save_result_json(wav_path, metadata, loudness, output_name, success, has_cov
         json.dump(result, f, indent=2)
 
 
-def convert_file(wav_path: str, fmt: str = 'mp3') -> Tuple[bool, Optional[str]]:
+def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True) -> Tuple[bool, Optional[str]]:
     """Convert a single WAV file to MP3 or M4A."""
     original_wav_path = wav_path
     temp_dir = None
@@ -1354,51 +1389,7 @@ def convert_file(wav_path: str, fmt: str = 'mp3') -> Tuple[bool, Optional[str]]:
     
     metadata = {k: v for k, v in metadata.items() if isinstance(v, str)}
     
-    cover_path = None
-    web_metadata = None
-    
-    cmd = f'ffmpeg -y -i "{wav_path}" -map 0:v -map -0:a -c:v copy "{temp_cover}" 2>/dev/null'
-    success, _, _ = run_cmd(cmd)
-    if Path(temp_cover).exists():
-        cover_path = temp_cover
-        logger.info(f"  Cover: Extracted from source")
-    else:
-        local_cover = find_local_cover(wav_path)
-        if local_cover:
-            if local_cover.lower().endswith('.png'):
-                success, _, _ = run_cmd(f'ffmpeg -y -i "{local_cover}" "{temp_cover}" 2>/dev/null')
-                if success and Path(temp_cover).exists():
-                    cover_path = temp_cover
-            else:
-                cover_path = local_cover
-            logger.info(f"  Cover: Found local file")
-        else:
-            search_title_clean = clean_title_for_search(search_title)
-            
-            cover_url = search_deezer_cover(search_artist, search_title_clean)
-            if cover_url:
-                download_cover(cover_url, temp_cover)
-                logger.info(f"  Cover: Downloaded from Deezer")
-            elif search_artist or search_title:
-                cover_url = search_bandcamp_cover(search_artist, search_title_clean)
-                if cover_url:
-                    download_cover(cover_url, temp_cover)
-                    logger.info(f"  Cover: Downloaded from Bandcamp")
-                else:
-                    web_metadata, cover_url = search_soundcloud_web(search_artist, search_title, base_name)
-                    if cover_url:
-                        download_cover(cover_url, temp_cover)
-                        logger.info(f"  Cover: Downloaded from SoundCloud")
-                        if web_metadata and not metadata.get('artist'):
-                            metadata['artist'] = web_metadata[0] or ''
-                        if web_metadata and not metadata.get('title'):
-                            metadata['title'] = web_metadata[1] or ''
-            
-            if Path(temp_cover).exists():
-                cover_path = temp_cover
-            else:
-                logger.debug(f"  Cover: Not found")
-    
+    # Step 1: Encode audio FIRST (faster, allows parallelization later)
     success = encode_audio(wav_path, temp_output, metadata, gain_db, fmt)
     
     if not success:
@@ -1409,6 +1400,49 @@ def convert_file(wav_path: str, fmt: str = 'mp3') -> Tuple[bool, Optional[str]]:
                 os.remove(f)
         return False, None
     
+    # Step 2: Cover search AFTER encoding (only if embed_cover is enabled)
+    cover_path = None
+    
+    if embed_cover:
+        cmd = f'ffmpeg -y -i "{wav_path}" -map 0:v -map -0:a -c:v copy "{temp_cover}" 2>/dev/null'
+        success, _, _ = run_cmd(cmd)
+        if Path(temp_cover).exists():
+            cover_path = temp_cover
+            logger.info(f"  Cover: Extracted from source")
+        else:
+            local_cover = find_local_cover(wav_path)
+            if local_cover:
+                if local_cover.lower().endswith('.png'):
+                    success, _, _ = run_cmd(f'ffmpeg -y -i "{local_cover}" "{temp_cover}" 2>/dev/null')
+                    if success and Path(temp_cover).exists():
+                        cover_path = temp_cover
+                else:
+                    cover_path = local_cover
+                logger.info(f"  Cover: Found local file")
+            else:
+                search_title_clean = clean_title_for_search(search_title)
+                
+                cover_url = search_deezer_cover(search_artist, search_title_clean)
+                if cover_url:
+                    download_cover(cover_url, temp_cover)
+                    logger.info(f"  Cover: Downloaded from Deezer")
+                elif search_artist or search_title:
+                    cover_url = search_bandcamp_cover(search_artist, search_title_clean)
+                    if cover_url:
+                        download_cover(cover_url, temp_cover)
+                        logger.info(f"  Cover: Downloaded from Bandcamp")
+                    else:
+                        web_metadata, cover_url = search_soundcloud_web(search_artist, search_title, base_name)
+                        if cover_url:
+                            download_cover(cover_url, temp_cover)
+                            logger.info(f"  Cover: Downloaded from SoundCloud")
+        
+        if Path(temp_cover).exists():
+            cover_path = temp_cover
+        else:
+            logger.debug(f"  Cover: Not found")
+    
+    # Step 3: Embed cover if found
     if cover_path and Path(cover_path).exists():
         embed_success = embed_cover(temp_output, cover_path, output_name, fmt)
         
@@ -1530,12 +1564,12 @@ def lookup_online_metadata(base_name: str):
 
 def _convert_file_wrapper(args):
     """Wrapper for parallel processing."""
-    wav_path, fmt = args
-    success, output = convert_file(wav_path, fmt)
+    wav_path, fmt, embed_cover = args
+    success, output = convert_file(wav_path, fmt, embed_cover)
     return (wav_path, success, output)
 
 
-def convert_batch(file_paths, fmt='mp3', parallel=True, max_workers=5):
+def convert_batch(file_paths, fmt='mp3', parallel=True, max_workers=5, embed_cover=True):
     """Convert multiple WAV files.
     
     Args:
@@ -1543,6 +1577,7 @@ def convert_batch(file_paths, fmt='mp3', parallel=True, max_workers=5):
         fmt: Output format ('mp3' or 'm4a')
         parallel: Use parallel processing (default: True)
         max_workers: Max parallel processes (default: 5)
+        embed_cover: Embed cover art (default: True)
     
     Returns:
         List of (wav_path, success, output) tuples
@@ -1551,13 +1586,13 @@ def convert_batch(file_paths, fmt='mp3', parallel=True, max_workers=5):
     
     if not parallel or len(file_paths) < 4:
         for wav_path in file_paths:
-            results.append(_convert_file_wrapper((wav_path, fmt)))
+            results.append(_convert_file_wrapper((wav_path, fmt, embed_cover)))
         return results
     
     logger.info(f"Converting {len(file_paths)} files in parallel (max {max_workers} workers)...")
     
     with ProcessPoolExecutor(max_workers=min(max_workers, len(file_paths))) as executor:
-        futures = {executor.submit(_convert_file_wrapper, (fp, fmt)): fp for fp in file_paths}
+        futures = {executor.submit(_convert_file_wrapper, (fp, fmt, embed_cover)): fp for fp in file_paths}
         for future in as_completed(futures):
             results.append(future.result())
     
@@ -1619,13 +1654,15 @@ if __name__ == '__main__':
     else:
         fmt = args.format
     
+    embed_cover = args.embed_cover
+    
     logger.info(f"Output format: {fmt.upper()}")
     
     if len(wav_files) == 1:
-        success, output = convert_file(wav_files[0], fmt)
+        success, output = convert_file(wav_files[0], fmt, embed_cover)
         sys.exit(0 if success else 1)
     
-    results = convert_batch(wav_files, fmt, parallel=(len(wav_files) >= 4), max_workers=args.max_workers)
+    results = convert_batch(wav_files, fmt, parallel=(len(wav_files) >= 4), max_workers=args.max_workers, embed_cover=embed_cover)
     
     success_count = sum(1 for _, s, _ in results if s)
     logger.info(f"\nBatch complete: {success_count}/{len(results)} succeeded")
