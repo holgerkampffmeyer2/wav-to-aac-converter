@@ -100,7 +100,16 @@ def _lookup_musicbrainz(term: str):
             # Try to get artist from releases
             releases = recording.get('releases', [])
             if releases:
-                artist = releases[0].get('artist-credit', [{}])[0].get('name', '')
+                artist_credit = releases[0].get('artist-credit', [])
+                for ac in artist_credit:
+                    if ac.get('name'):
+                        artist = ac['name']
+                        break
+                    elif ac.get('artist', {}).get('name'):
+                        artist = ac['artist']['name']
+                        break
+                else:
+                    artist = ''
             else:
                 artist = ''
             title = recording.get('title', '')

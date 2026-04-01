@@ -39,8 +39,13 @@ Most functions now have type hints.
 - Added @lru_cache to to_ascii_filename for caching
 - Early returns in search functions
 
-### 8. Code Organization (Skipped)
-- Modularization skipped for stability - single file is maintainable for this project size
+### 8. Code Organization ✅ DONE
+- Modularized into 4 separate modules:
+  - utils.py: constants, regex, helper functions
+  - audio_processing.py: FFmpeg, encoding functions
+  - metadata.py: metadata extraction, online lookup
+  - cover_art.py: Deezer, MusicBrainz, Bandcamp search
+- convert.py now imports from modules
 
 ## Priority Summary
 

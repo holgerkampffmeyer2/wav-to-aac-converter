@@ -23,6 +23,7 @@ def run_cmd(cmd: str, capture_output: bool = True, timeout: int = ENCODE_TIMEOUT
 
 def analyze_loudness(wav_path: str) -> Optional[Dict[str, Any]]:
     """Analyze loudness of WAV file using first 5 minutes for speed."""
+    import json
     cmd = f'ffmpeg -t 300 -i "{wav_path}" -af loudnorm=print_format=json -f null - 2>&1'
     success, stdout, stderr = run_cmd(cmd)
     if not success:
@@ -32,7 +33,6 @@ def analyze_loudness(wav_path: str) -> Optional[Dict[str, Any]]:
         start = output.index('{')
         end = output.rindex('}') + 1
         data = output[start:end]
-        import json
         return json.loads(data)
     except (ValueError, json.JSONDecodeError) as e:
         logger.warning(f"Loudness analysis parse error: {e}")
