@@ -2,7 +2,7 @@
 
 ![AI-Powered Audio Conversion](assets/ai-powered.png)
 
-[![Python Version](https://img.shields.io/github/pipenv/python-version/holgerkampffmeyer2/wav-to-aac-converter)](https://github.com/holgerkampffmeyer2/wav-to-aac-converter)
+[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)](https://github.com/holgerkampffmeyer2/wav-to-aac-converter)
 [![License](https://img.shields.io/github/license/holgerkampffmeyer2/wav-to-aac-converter)](https://github.com/holgerkampffmeyer2/wav-to-aac-converter)
 
 AI-agent driven WAV to MP3/M4A conversion with loudness normalization, metadata extraction, and cover art embedding.
