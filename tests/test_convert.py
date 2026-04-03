@@ -708,11 +708,12 @@ class TestOnlineMetadataLookup(unittest.TestCase):
 
     @patch('utils.fetch_url')
     def test_lookup_online_metadata_fallback_to_musicbrainz(self, mock_fetch):
-        """If iTunes fails, fallback to MusicBrainz via Bandcamp."""
+        """If iTunes and Deezer fail, fallback to MusicBrainz via Bandcamp."""
         import json
-        # iTunes returns nothing, Bandcamp returns nothing, MusicBrainz has results
+        # iTunes returns nothing, Deezer returns nothing, Bandcamp returns nothing, MusicBrainz has results
         mock_fetch.side_effect = [
             json.dumps({"resultCount": 0}),  # iTunes
+            json.dumps({"data": []}),  # Deezer
             "",  # Bandcamp search
             json.dumps({  # MusicBrainz
                 "recordings": [{

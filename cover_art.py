@@ -216,15 +216,13 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
             title = raw_title
             metadata['title'] = title
     
-    if online_lookup_enabled and artist and title:
+    if online_lookup_enabled and not (artist and title):
         online_artist, online_title = lookup_online_metadata(f"{artist} {title}")
         if online_artist and online_title:
-            if not artist:
-                artist = online_artist
-                metadata['artist'] = artist
-            if not title:
-                title = online_title
-                metadata['title'] = title
+            artist = online_artist
+            title = online_title
+            metadata['artist'] = artist
+            metadata['title'] = title
             logger.info(f"  Online metadata: {artist} - {title}")
     
     if not artist or not title:
@@ -239,9 +237,8 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
             logger.info(f"  Metadata from filename: {artist} - {title}")
     
     if enrich_enabled and artist and title:
-        enriched = enrich_file_metadata(wav_path, artist, title, config)
+        enriched = enrich_file_metadata(wav_path, artist, title, config, current_metadata)
         if enriched:
-            logger.info(f"  Enriched metadata: {enriched}")
             metadata.update(enriched)
     
     cover_source = _find_cover(wav_path, artist, title)

@@ -8,6 +8,7 @@ import urllib.parse
 from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 from difflib import SequenceMatcher
+from functools import lru_cache
 
 from utils import (
     ITUNES_SEARCH_URL,
@@ -248,18 +249,50 @@ def _lookup_bandcamp(term: str):
     return None, None
 
 
+def _lookup_deezer(term: str):
+    """Lookup track on Deezer API."""
+    if not term:
+        return None, None
+    
+    from utils import fetch_url
+    
+    try:
+        query = quote(term)
+        url = f"https://api.deezer.com/search/track?q={query}&limit=5"
+        content = fetch_url(url, timeout=10)
+        if not content:
+            return None, None
+        data = json.loads(content)
+        if data.get('data') and len(data['data']) > 0:
+            track = data['data'][0]
+            artist = track.get('artist', {}).get('name', '')
+            title = track.get('title', '')
+            if artist and title:
+                return artist, title
+    except Exception:
+        pass
+    return None, None
+
+
 def lookup_online_metadata(base_name: str):
     """Look up metadata online using multiple sources.
     
-    Search order (like cover art):
+    Search order:
     1. iTunes (primary - best for mainstream)
-    2. Bandcamp (great for remixes, indie)
-    3. MusicBrainz (fallback for obscure)
+    2. Deezer (good for European tracks)
+    3. Bandcamp (great for remixes, indie)
+    4. MusicBrainz (fallback for obscure)
     """
     # Try iTunes first
     artist, title = _lookup_itunes(base_name)
     if artist and title:
         logger.debug(f"  iTunes found: {artist} - {title}")
+        return artist, title
+    
+    # Try Deezer
+    artist, title = _lookup_deezer(base_name)
+    if artist and title:
+        logger.debug(f"  Deezer found: {artist} - {title}")
         return artist, title
     
     # Fallback to Bandcamp
@@ -277,6 +310,7 @@ def lookup_online_metadata(base_name: str):
     return None, None
 
 
+@lru_cache(maxsize=256)
 def extract_metadata_from_filename(filename: str) -> Tuple[str, str]:
     """Extract artist and title from filename."""
     import re
@@ -754,13 +788,15 @@ def get_additional_metadata_online(artist: str, title: str) -> Dict[str, Optiona
     return result
 
 
-def _write_metadata_tag(wav_path: str, tag: str, value: str) -> bool:
-    """Write a specific tag to audio file metadata using ffmpeg."""
+def _write_metadata_tags(wav_path: str, tags: Dict[str, str]) -> bool:
+    """Write multiple metadata tags to audio file in a single ffmpeg call."""
     import os
     import subprocess
     
+    if not tags:
+        return True
+    
     try:
-        escaped_value = value.replace("'", "'\\''")
         path_obj = Path(wav_path)
         suffix = path_obj.suffix.lower()
         temp_path = str(path_obj) + '.tmp' + suffix
@@ -768,25 +804,30 @@ def _write_metadata_tag(wav_path: str, tag: str, value: str) -> bool:
         cmd = [
             'ffmpeg', '-y', '-i', str(wav_path),
             '-map', '0',
-            '-metadata', f'{tag}={escaped_value}',
             '-codec', 'copy',
-            temp_path
         ]
+        
+        for tag, value in tags.items():
+            escaped_value = value.replace("'", "'\\''")
+            cmd.extend(['-metadata', f'{tag}={escaped_value}'])
+        
+        cmd.append(temp_path)
+        
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if result.returncode == 0:
             os.replace(temp_path, str(wav_path))
             return True
         else:
-            logger.warning(f"Failed to write metadata tag {tag} to {wav_path}: {result.stderr[:200]}")
+            logger.warning(f"Failed to write metadata tags to {wav_path}: {result.stderr[:200]}")
             if os.path.exists(temp_path):
                 os.remove(temp_path)
             return False
     except Exception as e:
-        logger.warning(f"Error writing metadata tag {tag} to {wav_path}: {str(e)}")
+        logger.warning(f"Error writing metadata tags to {wav_path}: {str(e)}")
         return False
 
 
-def enrich_file_metadata(wav_path: str, artist: str, title: str, config: Dict[str, Any]) -> Dict[str, Any]:
+def enrich_file_metadata(wav_path: str, artist: str, title: str, config: Dict[str, Any], current_metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Enrich file metadata from online sources and write to file.
     
     Args:
@@ -794,6 +835,7 @@ def enrich_file_metadata(wav_path: str, artist: str, title: str, config: Dict[st
         artist: Artist name
         title: Track title
         config: Configuration dict with enrich_metadata settings
+        current_metadata: Pre-extracted metadata to avoid duplicate ffprobe calls
         
     Returns:
         Dict with enriched metadata fields
@@ -805,25 +847,27 @@ def enrich_file_metadata(wav_path: str, artist: str, title: str, config: Dict[st
     if not write_tags:
         return enriched
     
-    current_metadata = extract_metadata(wav_path)
+    if current_metadata is None:
+        current_metadata = extract_metadata(wav_path)
     
     label_tag = label_source_tag if label_source_tag else 'label'
+    tags_to_write = {}
     
     if 'label' in write_tags:
         label = current_metadata.get('label') or current_metadata.get('Label') or current_metadata.get('TPUB')
         if not label:
             label = lookup_label_online(artist, title)
-            if label and _write_metadata_tag(wav_path, label_tag, label):
+            if label:
+                tags_to_write[label_tag] = label
                 enriched['label'] = label
-                logger.info(f"  Enriched: added label = {label}")
     
     if 'genre' in write_tags:
         genre = current_metadata.get('genre')
         if not genre:
             genre = get_genre_online(artist, title)
-            if genre and _write_metadata_tag(wav_path, 'genre', genre):
+            if genre:
+                tags_to_write['genre'] = genre
                 enriched['genre'] = genre
-                logger.info(f"  Enriched: added genre = {genre}")
     
     if 'album' in write_tags or 'year' in write_tags or 'track_number' in write_tags:
         album = current_metadata.get('album')
@@ -834,18 +878,21 @@ def enrich_file_metadata(wav_path: str, artist: str, title: str, config: Dict[st
             additional = get_additional_metadata_online(artist, title)
             
             if 'album' in write_tags and not album and additional.get('album'):
-                if _write_metadata_tag(wav_path, 'album', additional['album']):
-                    enriched['album'] = additional['album']
-                    logger.info(f"  Enriched: added album = {additional['album']}")
+                tags_to_write['album'] = additional['album']
+                enriched['album'] = additional['album']
             
             if 'year' in write_tags and not year and additional.get('year'):
-                if _write_metadata_tag(wav_path, 'date', additional['year']):
-                    enriched['year'] = additional['year']
-                    logger.info(f"  Enriched: added year = {additional['year']}")
+                tags_to_write['date'] = additional['year']
+                enriched['year'] = additional['year']
             
             if 'track_number' in write_tags and not track_number and additional.get('track_number'):
-                if _write_metadata_tag(wav_path, 'track', str(additional['track_number'])):
-                    enriched['track_number'] = additional['track_number']
-                    logger.info(f"  Enriched: added track_number = {additional['track_number']}")
+                tags_to_write['track'] = str(additional['track_number'])
+                enriched['track_number'] = additional['track_number']
+    
+    if tags_to_write:
+        if _write_metadata_tags(wav_path, tags_to_write):
+            logger.info(f"  Enriched metadata: {enriched}")
+        else:
+            enriched = {}
     
     return enriched
