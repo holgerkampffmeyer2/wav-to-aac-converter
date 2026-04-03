@@ -132,9 +132,10 @@ sudo apt install ffmpeg python3
 
 - **Codecs**: MP3 (libmp3lame) or M4A/AAC, 320kbps
 - **Loudness**: True Peak ≤ -0.1 dBTP (auto-calculated gain)
-- **Cover Sources**: Source → Local folder → Deezer → Bandcamp → MusicBrainz
+- **Cover Sources**: Source (embedded) → Local folder → Deezer → MusicBrainz → Bandcamp
 - **Retry Logic**: 3 attempts with exponential backoff
 - **Metadata Sources**: WAV tags → iTunes → Bandcamp → MusicBrainz → filename parsing
+- **Enrichment Tags**: label, genre, album, year, track_number (if enrich_metadata enabled)
 
 ## Testing
 

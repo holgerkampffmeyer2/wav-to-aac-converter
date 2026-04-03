@@ -16,8 +16,8 @@ The agent handles:
 - Prerequisites check (ffmpeg, python3)
 - File discovery and batch processing decisions
 - Loudness analysis and gain calculation
-- Metadata extraction from files, online lookup (iTunes/MusicBrainz), or web search
-- Cover art search: embedded → local folder → Deezer → Bandcamp → SoundCloud
+- Metadata extraction from files, online lookup (iTunes → Bandcamp → MusicBrainz), or filename parsing
+- Cover art search: embedded → local folder → Deezer → MusicBrainz → Bandcamp
 - Error recovery and retries
 - Verification of output quality
 
@@ -34,7 +34,17 @@ The converter can be configured using a `config.json` file in the same directory
   "embed_cover": true,
   "retry_attempts": 3,
   "timeout_seconds": 30,
-  "fuzzy_threshold": 0.8
+  "fuzzy_threshold": 0.8,
+  "online_lookup": {
+    "enabled": true,
+    "sources": ["itunes", "bandcamp", "musicbrainz", "deezer"],
+    "fallback_to_filename": true
+  },
+  "enrich_metadata": {
+    "enabled": true,
+    "write_tags": ["label", "genre", "album", "year", "track_number"],
+    "label_source_tag": "label"
+  }
 }
 ```
 
@@ -46,6 +56,12 @@ The converter can be configured using a `config.json` file in the same directory
 - `retry_attempts`: Retry attempts for failed operations (default: 3)
 - `timeout_seconds`: Timeout in seconds for operations (default: 30)
 - `fuzzy_threshold`: Similarity threshold for fuzzy matching (0.0-1.0, default: 0.8)
+- `online_lookup.enabled`: Enable online metadata lookup (default: true)
+- `online_lookup.sources`: Online sources to use for metadata lookup (default: itunes, bandcamp, musicbrainz, deezer)
+- `online_lookup.fallback_to_filename`: Fallback to filename parsing if no metadata found (default: true)
+- `enrich_metadata.enabled`: Write missing metadata tags to file from online sources (default: true)
+- `enrich_metadata.write_tags`: Tags to write when enriching (default: label, genre, album, year, track_number)
+- `enrich_metadata.label_source_tag`: Tag name for label (default: label)
 
 Note: Unicode filename to ASCII conversion is now automatic and always applied to ensure compatibility with audio processing tools.
 
@@ -84,6 +100,11 @@ python3 convert.py --m4a *.wav            # Batch to M4A
 
 # Alternative format specification
 python3 convert.py --format m4a file.wav
+
+# Metadata enrichment options
+python3 convert.py --enrich-metadata file.wav    # Enable metadata enrichment (default: true)
+python3 convert.py --no-enrich-metadata file.wav  # Disable metadata enrichment
+python3 convert.py --no-online-lookup file.wav    # Disable online metadata lookup
 ```
 
 ## Unicode Filename Handling
@@ -138,7 +159,22 @@ sudo apt install ffmpeg python3
 
 1. **Source file**: Extract embedded cover from WAV
 2. **Local folder**: Look for `cover.png`, `cover.jpg`, or matching image files
-3. **Web search**: Deezer (with fuzzy matching) → Bandcamp → MusicBrainz
+3. **Online search**: Deezer → MusicBrainz → Bandcamp
+
+## Metadata Strategy
+
+### Metadata Lookup Sources (in priority order)
+1. **WAV tags**: Extract artist/title from embedded metadata via ffprobe
+2. **Online lookup**: iTunes → Bandcamp → MusicBrainz → Deezer
+3. **Filename parsing**: Fallback to heuristic parsing of filename ("Artist - Title")
+
+### Metadata Enrichment
+When `enrich_metadata.enabled` is true, missing metadata tags are written to the WAV file from online sources:
+- `label` (or custom tag via `label_source_tag`)
+- `genre`
+- `album`
+- `year`
+- `track_number`
 
 ## File Structure
 

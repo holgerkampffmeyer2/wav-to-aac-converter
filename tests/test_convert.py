@@ -503,7 +503,17 @@ class TestConfigFeatures(unittest.TestCase):
                     "embed_cover": True,
                     "retry_attempts": 3,
                     "timeout_seconds": 30,
-                    "fuzzy_threshold": 0.8
+                    "fuzzy_threshold": 0.8,
+                    "online_lookup": {
+                        "enabled": True,
+                        "sources": ["itunes", "bandcamp", "musicbrainz", "deezer"],
+                        "fallback_to_filename": True
+                    },
+                    "enrich_metadata": {
+                        "enabled": True,
+                        "write_tags": ["label", "genre", "album", "year", "track_number"],
+                        "label_source_tag": "label"
+                    }
                 }
                 self.assertEqual(config, expected)
 
@@ -601,26 +611,32 @@ class TestConfigFeatures(unittest.TestCase):
     def test_convert_batch_ascii_filename_param(self):
         """Test that convert_batch works without ascii_filename parameter (removed)."""
         from convert import convert_batch, _convert_file_wrapper
-        from unittest.mock import patch
+        from unittest.mock import patch, MagicMock
         
         # Mock convert_file to avoid actual processing
         # _convert_file_wrapper expects convert_file to return (success, output)
         # and then returns (wav_path, success, output)
+        
+        # Create a mock config that will match what convert_batch passes
+        mock_config = MagicMock()
+        
         with patch('convert.convert_file', return_value=(True, 'output.wav')) as mock_convert:
             file_paths = ['file1.wav', 'file2.wav']
             # Test that convert_batch works without ascii_filename parameter
-            results = convert_batch(file_paths, 'mp3', True, 2, embed_cover=True)
-            # Check that convert_file was called for each file
-            mock_convert.assert_any_call('file1.wav', 'mp3', True)
-            mock_convert.assert_any_call('file2.wav', 'mp3', True)
+            # Pass a specific config dict to avoid needing to match load_config() result
+            test_config = {"output_format": "mp3"}
+            results = convert_batch(file_paths, 'mp3', True, 2, embed_cover=True, config=test_config)
+            # Check that convert_file was called with the config we passed
+            mock_convert.assert_any_call('file1.wav', 'mp3', True, test_config)
+            mock_convert.assert_any_call('file2.wav', 'mp3', True, test_config)
             
             # Reset mock
             mock_convert.reset_mock()
             
             # Test with parallel=False
-            results = convert_batch(file_paths, 'mp3', False, 2, embed_cover=True)
-            mock_convert.assert_any_call('file1.wav', 'mp3', True)
-            mock_convert.assert_any_call('file2.wav', 'mp3', True)
+            results = convert_batch(file_paths, 'mp3', False, 2, embed_cover=True, config=test_config)
+            mock_convert.assert_any_call('file1.wav', 'mp3', True, test_config)
+            mock_convert.assert_any_call('file2.wav', 'mp3', True, test_config)
 
 
 class TestOnlineMetadataLookup(unittest.TestCase):
@@ -1190,7 +1206,7 @@ class TestBatchProcessing(unittest.TestCase):
         """Test batch continues processing when one file fails."""
         from convert import convert_batch
         
-        def side_effect(path, fmt, embed_cover):
+        def side_effect(path, fmt, embed_cover, config=None):
             if "fail" in path:
                 return (False, None)
             return (True, "output.mp3")

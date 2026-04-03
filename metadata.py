@@ -3,6 +3,9 @@
 
 import json
 import logging
+import urllib.request
+import urllib.parse
+from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 from difflib import SequenceMatcher
 
@@ -15,6 +18,9 @@ from utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Alias for convenience
+quote = urllib.parse.quote
 
 
 def run_cmd(cmd: str, capture_output: bool = True, timeout: int = 600):
@@ -115,7 +121,6 @@ def _lookup_itunes(term: str):
     threshold = config.get('fuzzy_threshold', 0.8)
     
     from utils import fetch_url
-    from urllib.parse import quote
     
     term_quoted = quote(term)
     url = f"{ITUNES_SEARCH_URL}{term_quoted}&entity=song&limit=10"
@@ -171,7 +176,6 @@ def _lookup_musicbrainz(term: str):
         return None, None
     
     from utils import fetch_url
-    from urllib.parse import quote
     
     term_quoted = quote(term)
     url = f"{MUSICBRAINZ_LOOKUP_URL}recording={term_quoted}&fmt=json&limit=5"
@@ -213,7 +217,6 @@ def _lookup_bandcamp(term: str):
         return None, None
     
     from utils import fetch_url, clean_title_for_search
-    from urllib.parse import quote
     
     cleaned_term = clean_title_for_search(term)
     if not cleaned_term:
@@ -340,3 +343,509 @@ def _is_valid_filename_part(text: str, descriptive_terms: set) -> bool:
     if len(text.strip()) < 2:
         return False
     return True
+
+
+_label_cache = {}
+_genre_cache = {}
+_additional_metadata_cache = {}
+
+
+def _is_electronic_genre(genre: str) -> bool:
+    """Check if a genre is likely electronic music."""
+    if not genre:
+        return False
+    
+    genre_lower = genre.lower().strip()
+    
+    electronic_keywords = {
+        'electronic', 'techno', 'house', 'trance', 'drum and bass', 'drum n bass', 
+        'drum & bass', 'jungle', 'dubstep', 'electronica', 'ambient', 'industrial',
+        'edm', 'dance', 'garage', 'breakbeat', 'hardcore', 'hard house', 'progressive',
+        'minimal', 'deep house', 'tech house', 'acid house', 'hard techno', 'hard trance',
+        'gabber', 'happy hardcore', 'uk garage', '2step', 'breaks', 'electro', 'synthpop',
+        'idm', 'intelligent dance music', 'chiptune', 'glitch', 'hardstyle', 'hardcore techno',
+        'power noise', 'noisecore', 'dark ambient', 'vrtechno', 'hard dance', 
+        'nu skool breaks', 'funky breaks', 'bassline', 'uk funky', 'future garage', 
+        'post dubstep', 'future bass', 'trap', 'downtempo', 'chillout', 'lounge', 
+        'nu jazz', 'electro swing', 'electroclash', 'new rave', 'bleep', 'bmore club', 
+        'baltimore club', 'ghetto house', 'juke', 'footwork', 'seapunk', 'vaporwave', 
+        'cloud rap', 'witch house', 'salem', 'drag'
+    }
+    
+    for keyword in electronic_keywords:
+        if keyword in genre_lower:
+            return True
+    
+    return False
+
+
+def _normalize_genre(genre: str) -> str:
+    """Normalize genre to standard forms."""
+    if not genre:
+        return ""
+    
+    genre = genre.strip()
+    
+    normalizations = {
+        'drum and bass': 'DRUM N BASS',
+        'drum & bass': 'DRUM N BASS',
+        'electronic dance music': 'EDM',
+        'intelligent dance music': 'IDM',
+        'uk garage': 'UKG',
+    }
+    
+    genre_lower = genre.lower()
+    for key, value in normalizations.items():
+        if key in genre_lower:
+            genre = genre.lower().replace(key, value)
+    
+    if genre.lower() == genre.strip().lower() and genre == genre.strip():
+        applied_normalization = False
+        for key in normalizations.keys():
+            if key in genre_lower:
+                applied_normalization = True
+                break
+        
+        if not applied_normalization:
+            return genre.title()
+    
+    return genre
+
+
+def _get_genre_from_bandcamp(artist: str, title: str) -> Tuple[Optional[str], Optional[str]]:
+    """Lookup genre and label via Bandcamp search."""
+    from utils import fetch_url
+    
+    cache_key = f"{artist.lower()}:{title.lower()}"
+    if cache_key in _genre_cache:
+        cached = _genre_cache[cache_key]
+        if isinstance(cached, tuple) and len(cached) == 2:
+            return cached
+        return (None, None)
+    
+    result = (None, None)
+    
+    try:
+        query = quote(f"{artist} {title}")
+        search_url = f"https://bandcamp.com/search?q={query}&item_type=t"
+        
+        request = urllib.request.Request(
+            search_url,
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        )
+        
+        with urllib.request.urlopen(request, timeout=10) as response:
+            html_content = response.read().decode('utf-8', errors='ignore')
+            result = _parse_bandcamp_genre(html_content)
+            
+            if result[0] is None and result[1] is None:
+                result = _try_direct_bandcamp_url(artist, title)
+            
+            if result[0] is not None or result[1] is not None:
+                _genre_cache[cache_key] = result
+                return result
+                
+    except Exception:
+        pass
+    
+    _genre_cache[cache_key] = (None, None)
+    return (None, None)
+
+
+def _try_direct_bandcamp_url(artist: str, title: str) -> Tuple[Optional[str], Optional[str]]:
+    """Try to access Bandcamp page directly using artist name."""
+    from utils import fetch_url
+    
+    artist_slug = artist.lower().replace(' ', '-').replace('&', '').replace("'", '').strip()
+    title_slug = title.lower().replace(' ', '-').replace('(', '').replace(')', '').replace('[', '').replace(']', '').replace("'", '').replace('&', '').strip()
+    
+    url_patterns = [
+        f"https://{artist_slug}.bandcamp.com/track/{title_slug}",
+        f"https://{artist_slug}.bandcamp.com/track/{artist_slug}-{title_slug}",
+    ]
+    
+    for url in url_patterns:
+        try:
+            request = urllib.request.Request(
+                url,
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            )
+            
+            with urllib.request.urlopen(request, timeout=10) as response:
+                if response.status == 200:
+                    html_content = response.read().decode('utf-8', errors='ignore')
+                    result = _parse_bandcamp_json_ld(html_content)
+                    if result[0] is not None or result[1] is not None:
+                        return result
+        
+        except Exception:
+            continue
+    
+    return (None, None)
+
+
+def _parse_bandcamp_json_ld(html_content: str) -> Tuple[Optional[str], Optional[str]]:
+    """Parse Bandcamp JSON-LD schema to extract genre keywords and label."""
+    import re
+    
+    genre = None
+    label = None
+    
+    json_ld_pattern = r'<script[^>]*type="application/ld\+json"[^>]*>([^<]+)</script>'
+    matches = re.findall(json_ld_pattern, html_content, re.IGNORECASE)
+    
+    keywords_found = []
+    
+    for match in matches:
+        try:
+            data = json.loads(match)
+            
+            if isinstance(data, dict):
+                keywords = data.get('keywords', [])
+                if isinstance(keywords, list):
+                    keywords_found.extend([k.lower() for k in keywords])
+                
+                publisher = data.get('publisher', {})
+                if isinstance(publisher, dict):
+                    label = publisher.get('name')
+                
+                if not label:
+                    by_artist = data.get('byArtist', {})
+                    if isinstance(by_artist, dict):
+                        label = by_artist.get('name')
+                        
+        except (json.JSONDecodeError, TypeError):
+            continue
+    
+    keywords_lower = [k.lower() for k in keywords_found]
+    
+    house_keywords = {'house', 'tech house', 'afro house', 'deep house', 'disco house',
+                     'melodic house', 'organic house', 'future house', 'progressive house',
+                     'tropical house', 'funky house', 'garage', 'funky'}
+    
+    dnb_keywords = {'drum and bass', 'dnb', 'drum&bass', 'drum n bass', 'jungle', 'neurofunk', 'techstep'}
+    
+    techno_keywords = {'techno', 'hard techno', 'minimal'}
+    trance_keywords = {'trance', 'psytrance', 'progressive trance'}
+    
+    for kw in keywords_lower:
+        if kw in house_keywords:
+            genre = 'House'
+            break
+        elif kw in dnb_keywords:
+            genre = 'DnB'
+            break
+        elif kw in techno_keywords:
+            genre = 'Techno'
+            break
+        elif kw in trance_keywords:
+            genre = 'Trance'
+            break
+    
+    if not genre:
+        for kw in keywords_lower:
+            if 'house' in kw:
+                genre = 'House'
+                break
+            elif 'drum' in kw and 'bass' in kw:
+                genre = 'DnB'
+                break
+    
+    return (genre, label)
+
+
+def _parse_bandcamp_genre(html_content: str) -> Tuple[Optional[str], Optional[str]]:
+    """Parse Bandcamp search results HTML to find genre and label."""
+    import re
+    
+    genre = None
+    label = None
+    
+    json_ld_result = _parse_bandcamp_json_ld(html_content)
+    if json_ld_result[0] is not None or json_ld_result[1] is not None:
+        return json_ld_result
+    
+    tag_pattern = r'<a[^>]+class="tag"[^>]*>([^<]+)</a>'
+    tags = re.findall(tag_pattern, html_content, re.IGNORECASE)
+    
+    house_related = {'house', 'tech house', 'afro house', 'deep house', 'disco house', 
+                     'melodic house', 'organic house', 'future house', 'progressive house',
+                     'tropical house', 'funky house'}
+    
+    electronic_genres = {'techno', 'tech house', 'trance', 'ambient', 'electronica', 
+                        'downtempo', 'chillout', 'electro', 'dubstep', 'drum and bass',
+                        'dnb', 'drone', 'idm', 'experimental'}
+    
+    all_tags = [tag.strip().lower() for tag in tags]
+    
+    for tag in all_tags:
+        if tag in house_related:
+            genre = 'House'
+            break
+        elif tag in electronic_genres:
+            genre = tag.title()
+            break
+        elif tag == 'electronic':
+            genre = 'Electronic'
+            break
+    
+    if not genre:
+        for tag in all_tags:
+            if 'house' in tag:
+                genre = 'House'
+                break
+            elif 'techno' in tag:
+                genre = 'Techno'
+                break
+            elif 'trance' in tag:
+                genre = 'Trance'
+                break
+    
+    return (genre, label)
+
+
+def lookup_label_online(artist: str, title: str) -> Optional[str]:
+    """Lookup label via online services (iTunes primary with track ID lookup)."""
+    cache_key = f"{artist.lower()}:{title.lower()}"
+    if cache_key in _label_cache:
+        return _label_cache[cache_key]
+    
+    try:
+        query = quote(f"{artist} {title}")
+        url = f"https://itunes.apple.com/search?term={query}&entity=musicTrack&attribute=songTerm&limit=5"
+        with urllib.request.urlopen(url, timeout=10) as response:
+            data = json.loads(response.read().decode())
+            if data['resultCount'] > 0:
+                for track in data['results'][:3]:
+                    label = track.get('label')
+                    if label and label.strip():
+                        _label_cache[cache_key] = label.strip()
+                        return label.strip()
+                    elif 'trackId' in track:
+                        track_id = track['trackId']
+                        detail_url = f"https://itunes.apple.com/lookup?id={track_id}"
+                        with urllib.request.urlopen(detail_url, timeout=10) as detail_response:
+                            detail_data = json.loads(detail_response.read().decode())
+                            if detail_data['resultCount'] > 0:
+                                detail_label = detail_data['results'][0].get('label')
+                                if detail_label and detail_label.strip():
+                                    _label_cache[cache_key] = detail_label.strip()
+                                    return detail_label.strip()
+    except Exception:
+        pass
+    
+    _label_cache[cache_key] = None
+    return None
+
+
+def get_genre_online(artist: str, title: str) -> Optional[str]:
+    """Lookup genre via online services with improved accuracy for electronic music."""
+    cache_key = f"{artist.lower()}:{title.lower()}"
+    if cache_key in _genre_cache:
+        cached = _genre_cache[cache_key]
+        if isinstance(cached, str):
+            return cached
+        return None
+    
+    try:
+        query = quote(f"{artist} {title}")
+        url = f"https://itunes.apple.com/search?term={query}&entity=musicTrack&attribute=songTerm&limit=10"
+        with urllib.request.urlopen(url, timeout=10) as response:
+            data = json.loads(response.read().decode())
+            if data['resultCount'] > 0:
+                electronic_genres = []
+                for track in data['results'][:5]:
+                    genre = track.get('primaryGenreName')
+                    if genre and _is_electronic_genre(genre):
+                        electronic_genres.append(_normalize_genre(genre))
+                
+                if electronic_genres:
+                    best_genre = electronic_genres[0]
+                    _genre_cache[cache_key] = best_genre
+                    return best_genre
+                if data['results']:
+                    first_genre = data['results'][0].get('primaryGenreName')
+                    if first_genre:
+                        normalized_genre = _normalize_genre(first_genre)
+                        _genre_cache[cache_key] = normalized_genre
+                        return normalized_genre
+    except Exception:
+        pass
+    
+    bandcamp_genre, _ = _get_genre_from_bandcamp(artist, title)
+    if bandcamp_genre:
+        _genre_cache[cache_key] = bandcamp_genre
+        return bandcamp_genre
+    
+    try:
+        query = quote(f'artist:"{artist}" AND recording:"{title}"')
+        url = f"https://musicbrainz.org/ws/2/recording/?query={query}&fmt=json&limit=5"
+        request = urllib.request.Request(
+            url, 
+            headers={'User-Agent': 'WavConverter/1.0'}
+        )
+        with urllib.request.urlopen(url, timeout=10) as response:
+            data = json.loads(response.read().decode())
+            if data.get('recordings'):
+                for recording in data['recordings'][:3]:
+                    recording_id = recording['id']
+                    rg_url = f"https://musicbrainz.org/ws/2/release-group/?recording={recording_id}&fmt=json"
+                    rg_request = urllib.request.Request(rg_url, headers={'User-Agent': 'WavConverter/1.0'})
+                    with urllib.request.urlopen(rg_request, timeout=10) as rg_response:
+                        rg_data = json.loads(rg_response.read().decode())
+                        if rg_data.get('release-groups'):
+                            rg_id = rg_data['release-groups'][0]['id']
+                            tag_url = f"https://musicbrainz.org/ws/2/release-group/{rg_id}?inc=tags&fmt=json"
+                            tag_request = urllib.request.Request(tag_url, headers={'User-Agent': 'WavConverter/1.0'})
+                            with urllib.request.urlopen(tag_request, timeout=10) as tag_response:
+                                tag_data = json.loads(tag_response.read().decode())
+                                if 'tags' in tag_data.get('release-group', {}) and tag_data['release-group']['tags']:
+                                    genre_candidates = []
+                                    for tag in tag_data['release-group']['tags']:
+                                        tag_name = tag['name'].strip()
+                                        if _is_electronic_genre(tag_name):
+                                            genre_candidates.append((tag['count'], _normalize_genre(tag_name)))
+                                    
+                                    if genre_candidates:
+                                        genre_candidates.sort(reverse=True)
+                                        best_genre = genre_candidates[0][1]
+                                        _genre_cache[cache_key] = best_genre
+                                        return best_genre
+                                    elif tag_data['release-group']['tags']:
+                                        tags = tag_data['release-group']['tags']
+                                        try:
+                                            tags.sort(key=lambda x: x.get('count', 0), reverse=True)
+                                        except Exception:
+                                            pass
+                                        best_genre = _normalize_genre(tags[0]['name'])
+                                        _genre_cache[cache_key] = best_genre
+                                        return best_genre
+    except Exception:
+        pass
+    
+    _genre_cache[cache_key] = None
+    return None
+
+
+def get_additional_metadata_online(artist: str, title: str) -> Dict[str, Optional[str]]:
+    """Lookup additional metadata (album, year, track_number) from online services."""
+    cache_key = f"{artist.lower()}:{title.lower()}"
+    if cache_key in _additional_metadata_cache:
+        return _additional_metadata_cache[cache_key]
+    
+    result = {'album': None, 'year': None, 'track_number': None}
+    
+    try:
+        query = quote(f"{artist} {title}")
+        url = f"https://itunes.apple.com/search?term={query}&entity=musicTrack&attribute=songTerm&limit=5"
+        with urllib.request.urlopen(url, timeout=10) as response:
+            data = json.loads(response.read().decode())
+            if data['resultCount'] > 0:
+                track = data['results'][0]
+                result['album'] = track.get('collectionName')
+                result['track_number'] = track.get('trackNumber')
+                release_date = track.get('releaseDate')
+                if release_date:
+                    result['year'] = release_date[:4] if len(release_date) >= 4 else None
+    except Exception:
+        pass
+    
+    _additional_metadata_cache[cache_key] = result
+    return result
+
+
+def _write_metadata_tag(wav_path: str, tag: str, value: str) -> bool:
+    """Write a specific tag to audio file metadata using ffmpeg."""
+    import os
+    import subprocess
+    
+    try:
+        escaped_value = value.replace("'", "'\\''")
+        path_obj = Path(wav_path)
+        suffix = path_obj.suffix.lower()
+        temp_path = str(path_obj) + '.tmp' + suffix
+        
+        cmd = [
+            'ffmpeg', '-y', '-i', str(wav_path),
+            '-map', '0',
+            '-metadata', f'{tag}={escaped_value}',
+            '-codec', 'copy',
+            temp_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            os.replace(temp_path, str(wav_path))
+            return True
+        else:
+            logger.warning(f"Failed to write metadata tag {tag} to {wav_path}: {result.stderr[:200]}")
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+            return False
+    except Exception as e:
+        logger.warning(f"Error writing metadata tag {tag} to {wav_path}: {str(e)}")
+        return False
+
+
+def enrich_file_metadata(wav_path: str, artist: str, title: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Enrich file metadata from online sources and write to file.
+    
+    Args:
+        wav_path: Path to the WAV file
+        artist: Artist name
+        title: Track title
+        config: Configuration dict with enrich_metadata settings
+        
+    Returns:
+        Dict with enriched metadata fields
+    """
+    enriched = {}
+    write_tags = config.get('enrich_metadata', {}).get('write_tags', [])
+    label_source_tag = config.get('enrich_metadata', {}).get('label_source_tag', 'label')
+    
+    if not write_tags:
+        return enriched
+    
+    current_metadata = extract_metadata(wav_path)
+    
+    label_tag = label_source_tag if label_source_tag else 'label'
+    
+    if 'label' in write_tags:
+        label = current_metadata.get('label') or current_metadata.get('Label') or current_metadata.get('TPUB')
+        if not label:
+            label = lookup_label_online(artist, title)
+            if label and _write_metadata_tag(wav_path, label_tag, label):
+                enriched['label'] = label
+                logger.info(f"  Enriched: added label = {label}")
+    
+    if 'genre' in write_tags:
+        genre = current_metadata.get('genre')
+        if not genre:
+            genre = get_genre_online(artist, title)
+            if genre and _write_metadata_tag(wav_path, 'genre', genre):
+                enriched['genre'] = genre
+                logger.info(f"  Enriched: added genre = {genre}")
+    
+    if 'album' in write_tags or 'year' in write_tags or 'track_number' in write_tags:
+        album = current_metadata.get('album')
+        year = current_metadata.get('date')
+        track_number = current_metadata.get('track_number')
+        
+        if not album or not year or not track_number:
+            additional = get_additional_metadata_online(artist, title)
+            
+            if 'album' in write_tags and not album and additional.get('album'):
+                if _write_metadata_tag(wav_path, 'album', additional['album']):
+                    enriched['album'] = additional['album']
+                    logger.info(f"  Enriched: added album = {additional['album']}")
+            
+            if 'year' in write_tags and not year and additional.get('year'):
+                if _write_metadata_tag(wav_path, 'date', additional['year']):
+                    enriched['year'] = additional['year']
+                    logger.info(f"  Enriched: added year = {additional['year']}")
+            
+            if 'track_number' in write_tags and not track_number and additional.get('track_number'):
+                if _write_metadata_tag(wav_path, 'track', str(additional['track_number'])):
+                    enriched['track_number'] = additional['track_number']
+                    logger.info(f"  Enriched: added track_number = {additional['track_number']}")
+    
+    return enriched
