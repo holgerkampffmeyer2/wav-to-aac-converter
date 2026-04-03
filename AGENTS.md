@@ -54,20 +54,30 @@ python3 convert.py --m4a *.wav             # Batch to M4A
 
 ### Single File (Sequential)
 ```
-Loudness Analysis → Metadata Extraction (tags → online lookup → filename) → Cover Search → Encoding → Embed Artwork → Verify
+Loudness Analysis → Enrich Metadata + Cover Search (combined) → Encoding → Embed Artwork → Verify
 ```
 
 ### Metadata Extraction Strategy
 1. **WAV tags**: Extract artist/title from embedded metadata via ffprobe
-2. **Online lookup**: If tags missing, query iTunes Search API then MusicBrainz API using the filename (no extension)
+2. **Online lookup**: If tags missing, query iTunes → Deezer → Bandcamp → MusicBrainz
 3. **Filename parsing**: Fallback to heuristic parsing of the filename (separators, brackets, etc.)
 
 Note: Filename processing uses ASCII-converted versions to ensure compatibility with audio processing tools.
 
+### Metadata Enrichment (configurable)
+When `enrich_metadata.enabled` is true (default), missing tags are written to the WAV file:
+- **label**: Looked up via iTunes (primary) or Bandcamp (fallback)
+- **genre**: Looked up via iTunes → Bandcamp → MusicBrainz
+- **album, year, track_number**: Looked up via iTunes
+- Tags are written in a single ffmpeg call for efficiency
+- Caching prevents duplicate API calls for the same track
+
 ### Cover Artwork Strategy
-1. **Source file**: Check for embedded cover in WAV
+1. **Source file**: Extract embedded cover from WAV
 2. **Local folder**: Look for `cover.png`, `cover.jpg`, or matching image files
 3. **Web search**: Deezer → MusicBrainz → Bandcamp
+
+Note: Cover search stops at first successful match (early exit).
 
 ### Batch Processing
 - **Auto-detected**: 4+ files trigger parallel mode
@@ -85,6 +95,7 @@ Note: Filename processing uses ASCII-converted versions to ensure compatibility 
 | Encoding fails | Check WAV file integrity, try with stripped metadata |
 | All sources fail | Create output without cover, log warning |
 | Online metadata lookup fails | Fallback to filename parsing |
+| Enrich metadata fails | Continue without enrichment, log warning |
 
 ### Verification Checklist
 
@@ -134,7 +145,7 @@ sudo apt install ffmpeg python3
 - **Loudness**: True Peak ≤ -0.1 dBTP (auto-calculated gain)
 - **Cover Sources**: Source (embedded) → Local folder → Deezer → MusicBrainz → Bandcamp
 - **Retry Logic**: 3 attempts with exponential backoff
-- **Metadata Sources**: WAV tags → iTunes → Bandcamp → MusicBrainz → filename parsing
+- **Metadata Sources**: WAV tags → iTunes → Deezer → Bandcamp → MusicBrainz → filename parsing
 - **Enrichment Tags**: label, genre, album, year, track_number (if enrich_metadata enabled)
 
 ## Testing
@@ -154,10 +165,10 @@ python3 -m unittest tests.test_convert -v
 
 The test suite covers:
 - Filename parsing (artist/title extraction)
-- Metadata lookup (iTunes, MusicBrainz)
+- Metadata lookup (iTunes, Deezer, Bandcamp, MusicBrainz)
 - Cover art search (Deezer, MusicBrainz, Bandcamp, local files)
 - Loudness analysis and error handling
 - Encoding and verification
 - Batch processing (parallel/sequential)
 - Edge cases (Unicode, special characters, empty values)
-- Edge cases (Unicode, special characters, empty values)
+- Metadata enrichment (label, genre, album, year, track_number)

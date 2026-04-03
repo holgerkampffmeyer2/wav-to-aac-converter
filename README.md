@@ -16,7 +16,7 @@ The agent handles:
 - Prerequisites check (ffmpeg, python3)
 - File discovery and batch processing decisions
 - Loudness analysis and gain calculation
-- Metadata extraction from files, online lookup (iTunes → Bandcamp → MusicBrainz), or filename parsing
+- Metadata extraction from files, online lookup (iTunes → Deezer → Bandcamp → MusicBrainz), or filename parsing
 - Cover art search: embedded → local folder → Deezer → MusicBrainz → Bandcamp
 - Error recovery and retries
 - Verification of output quality
@@ -165,7 +165,7 @@ sudo apt install ffmpeg python3
 
 ### Metadata Lookup Sources (in priority order)
 1. **WAV tags**: Extract artist/title from embedded metadata via ffprobe
-2. **Online lookup**: iTunes → Bandcamp → MusicBrainz → Deezer
+2. **Online lookup**: iTunes → Deezer → Bandcamp → MusicBrainz
 3. **Filename parsing**: Fallback to heuristic parsing of filename ("Artist - Title")
 
 ### Metadata Enrichment
