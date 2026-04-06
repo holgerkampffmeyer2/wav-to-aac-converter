@@ -1292,5 +1292,157 @@ class TestEmbeddedWAVMetadata(unittest.TestCase):
         self.assertEqual(metadata, {})
 
 
+class TestEmbeddedCoverExtraction(unittest.TestCase):
+    """Tests for embedded cover extraction from WAV files."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.test_dir)
+
+    def test_find_cover_extracts_embedded(self):
+        """Test extracting embedded cover from WAV file."""
+        wav_path = os.path.join(self.test_dir, "test.wav")
+        
+        with open(wav_path, 'wb') as f:
+            f.write(b'RIFF' + b'\x00' * 100)
+        
+        with patch('audio_processing.run_cmd') as mock_run_cmd:
+            mock_run_cmd.return_value = (True, "", "")
+            
+            with patch('audio_processing.find_local_cover', return_value=None), \
+                 patch('cover_art.search_deezer_cover', return_value=None), \
+                 patch('cover_art.search_musicbrainz_cover', return_value=None), \
+                 patch('cover_art.search_bandcamp_cover', return_value=None), \
+                 patch('pathlib.Path.exists', return_value=True):
+                from cover_art import _find_cover
+                cover_path = _find_cover(wav_path, "Artist", "Title", wav_path)
+            
+            self.assertIsNotNone(cover_path)
+            self.assertTrue(cover_path.startswith('/tmp/cover_'))
+
+    def test_find_cover_fallback_to_local(self):
+        """Test fallback to local cover when embedded not found."""
+        wav_path = os.path.join(self.test_dir, "test.wav")
+        local_cover = os.path.join(self.test_dir, "cover.jpg")
+        
+        with open(wav_path, 'wb') as f:
+            f.write(b'RIFF' + b'\x00' * 100)
+        
+        with patch('audio_processing.run_cmd') as mock_run_cmd:
+            mock_run_cmd.return_value = (False, "", "")
+            
+            with patch('audio_processing.find_local_cover', return_value=local_cover), \
+                 patch('cover_art.search_deezer_cover', return_value=None), \
+                 patch('cover_art.search_musicbrainz_cover', return_value=None), \
+                 patch('cover_art.search_bandcamp_cover', return_value=None):
+                from cover_art import _find_cover
+                cover_path = _find_cover(wav_path, "Artist", "Title", wav_path)
+            
+            self.assertEqual(cover_path, local_cover)
+
+    def test_find_cover_fallback_to_online(self):
+        """Test fallback to online cover when local not found."""
+        wav_path = os.path.join(self.test_dir, "test.wav")
+        
+        with open(wav_path, 'wb') as f:
+            f.write(b'RIFF' + b'\x00' * 100)
+        
+        with patch('audio_processing.run_cmd') as mock_run_cmd:
+            mock_run_cmd.return_value = (False, "", "")
+            
+            with patch('audio_processing.find_local_cover', return_value=None), \
+                 patch('cover_art.search_deezer_cover', return_value="https://example.com/cover.jpg"), \
+                 patch('cover_art.search_musicbrainz_cover', return_value=None), \
+                 patch('cover_art.search_bandcamp_cover', return_value=None):
+                from cover_art import _find_cover
+                cover_path = _find_cover(wav_path, "Artist", "Title", wav_path)
+            
+            self.assertEqual(cover_path, "https://example.com/cover.jpg")
+
+    def test_find_cover_multiple_online_sources(self):
+        """Test fallback through multiple online sources."""
+        wav_path = os.path.join(self.test_dir, "test.wav")
+        
+        with open(wav_path, 'wb') as f:
+            f.write(b'RIFF' + b'\x00' * 100)
+        
+        with patch('audio_processing.run_cmd') as mock_run_cmd:
+            mock_run_cmd.return_value = (False, "", "")
+            
+            with patch('audio_processing.find_local_cover', return_value=None), \
+                 patch('cover_art.search_deezer_cover', return_value=None), \
+                 patch('cover_art.search_musicbrainz_cover', return_value="https://musicbrainz.com/cover.jpg"), \
+                 patch('cover_art.search_bandcamp_cover', return_value=None):
+                from cover_art import _find_cover
+                cover_path = _find_cover(wav_path, "Artist", "Title", wav_path)
+            
+            self.assertEqual(cover_path, "https://musicbrainz.com/cover.jpg")
+
+    def test_find_cover_no_cover_found(self):
+        """Test return None when no cover available."""
+        wav_path = os.path.join(self.test_dir, "test.wav")
+        
+        with open(wav_path, 'wb') as f:
+            f.write(b'RIFF' + b'\x00' * 100)
+        
+        with patch('audio_processing.run_cmd') as mock_run_cmd:
+            mock_run_cmd.return_value = (False, "", "")
+            
+            with patch('audio_processing.find_local_cover', return_value=None), \
+                 patch('cover_art.search_deezer_cover', return_value=None), \
+                 patch('cover_art.search_musicbrainz_cover', return_value=None), \
+                 patch('cover_art.search_bandcamp_cover', return_value=None):
+                from cover_art import _find_cover
+                cover_path = _find_cover(wav_path, "Artist", "Title", wav_path)
+            
+            self.assertIsNone(cover_path)
+
+
+class TestEnrichAndSearchCover(unittest.TestCase):
+    """Tests for combined enrich and cover search function."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.test_dir)
+
+    def test_enrich_and_search_cover_with_metadata(self):
+        """Test enrich_and_search_cover with existing metadata."""
+        wav_path = os.path.join(self.test_dir, "test.wav")
+        config = {'online_lookup': {'enabled': False}, 'enrich_metadata': {'enabled': False}}
+        
+        with patch('metadata.extract_metadata', return_value={'artist': 'Test Artist', 'title': 'Test Title'}), \
+             patch('metadata.enrich_file_metadata', return_value={'genre': 'Electronic'}), \
+             patch('cover_art._find_cover', return_value='/tmp/cover.jpg'):
+            from cover_art import enrich_and_search_cover
+            from metadata import extract_metadata_from_filename
+            
+            metadata, cover = enrich_and_search_cover(wav_path, "test.wav", config, wav_path)
+            
+            self.assertEqual(metadata['artist'], 'Test Artist')
+            self.assertEqual(metadata['title'], 'Test Title')
+            self.assertEqual(cover, '/tmp/cover.jpg')
+
+    def test_enrich_and_search_cover_fallback_to_filename(self):
+        """Test fallback to filename when no embedded metadata."""
+        wav_path = os.path.join(self.test_dir, "test.wav")
+        config = {'online_lookup': {'enabled': False, 'fallback_to_filename': True}, 'enrich_metadata': {'enabled': False}}
+        
+        with patch('metadata.extract_metadata', return_value={}), \
+             patch('metadata.extract_metadata_from_filename', return_value=('Artist From File', 'Title From File')), \
+             patch('cover_art._find_cover', return_value=None):
+            from cover_art import enrich_and_search_cover
+            
+            metadata, cover = enrich_and_search_cover(wav_path, "Artist From File - Title From File.wav", config, wav_path)
+            
+            self.assertEqual(metadata['artist'], 'Artist From File')
+            self.assertEqual(metadata['title'], 'Title From File')
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

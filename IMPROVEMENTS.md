@@ -40,18 +40,20 @@
 - All external API calls wrapped in try/catch with appropriate fallbacks
 
 ### 6. Test Coverage ✅ COMPLETE
-- Comprehensive test suite with 86 unit tests
+- Comprehensive test suite with 93 unit tests
 - Tests cover:
   - Filename parsing (artist/title extraction from various patterns)
   - Metadata lookup (iTunes, Bandcamp, MusicBrainz APIs)
-  - Cover art search (Deezer, Bandcamp, MusicBrainz, local files)
+  - Cover art search (Deezer, Bandcamp, MusicBrainz, local files, embedded)
   - Loudness analysis and error handling
   - Audio encoding and verification
   - Batch processing (parallel and sequential modes)
   - Edge cases (Unicode, special characters, empty values)
   - API error handling (network errors, invalid responses, rate limits)
   - Embedded WAV metadata extraction
-- All tests passing (86/86)
+  - Embedded cover extraction and cover priority (embedded → local → online)
+  - Enrich and search cover combined function
+- All tests passing (93/93)
 
 ### 7. Type Hints & Code Quality ✅ COMPLETE
 - Added type hints to majority of functions
@@ -88,8 +90,8 @@
 1. Embedded cover in WAV file
 2. Local folder (cover.jpg, cover.png, or matching filename)
 3. Deezer API (track search with fuzzy matching)
-4. Bandcamp web search
-5. MusicBrainz Cover Art Archive
+4. MusicBrainz Cover Art Archive
+5. Bandcamp web search
 
 ## Usage
 
@@ -114,7 +116,7 @@ python3 convert.py --max-workers 2 *.wav
 
 ## Test Results
 
-All 86 unit tests pass, covering:
+All 93 unit tests pass, covering:
 - ✅ Logic correctness
 - ✅ Error handling and recovery
 - ✅ Edge cases and boundary conditions
