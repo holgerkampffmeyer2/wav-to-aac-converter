@@ -90,29 +90,37 @@ def embed_cover(input_path: str, cover_path: str, final_path: str, fmt: str) -> 
 
 
 def find_local_cover(wav_path: str) -> Optional[str]:
-    """Find cover art in local folder."""
+    """Find cover art in local folder with fuzzy matching.
+    
+    Priority: cover.png/jpg -> exact filename -> fuzzy match -> any image
+    """
     from pathlib import Path
+    import re
     
     wav_dir = Path(wav_path).parent
     wav_stem = Path(wav_path).stem
     
-    # Check for cover.png, cover.jpg, or matching filename
-    for ext in ['.png', '.jpg', '.jpeg']:
-        # cover.png/jpg
-        cover_path = wav_dir / f"cover{ext}"
-        if cover_path.exists():
-            return str(cover_path)
-        
-        # [filename].png/jpg
-        named_cover = wav_dir / f"{wav_stem}{ext}"
-        if named_cover.exists():
-            return str(named_cover)
+    def normalize(s: str) -> str:
+        return re.sub(r'[-_\s]+', '', s.lower())
     
-    # Fallback: find any image in folder
-    for ext in ['.png', '.jpg', '.jpeg']:
-        for img_file in wav_dir.glob(f"*{ext}"):
-            if img_file.is_file():
-                return str(img_file)
+    normalized = normalize(wav_stem)
+    
+    for ext in ('.png', '.jpg', '.jpeg'):
+        candidates = [
+            wav_dir / f"cover{ext}",
+            wav_dir / f"{wav_stem}{ext}",  # exact
+        ]
+        for cand in candidates:
+            if cand.exists():
+                return str(cand)
+        
+        for img in wav_dir.glob(f"*{ext}"):
+            if normalize(img.stem) == normalized:
+                return str(img)
+    
+    for ext in ('.png', '.jpg', '.jpeg'):
+        for img in wav_dir.glob(f"*{ext}"):
+            return str(img)
     
     return None
 

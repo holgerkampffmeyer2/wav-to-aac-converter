@@ -137,7 +137,7 @@ def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True, conf
         input_tp = float(loudness.get('input_tp', -10))
         gain_db = min(0, -0.1 - input_tp)
         
-        metadata, cover_source = enrich_and_search_cover(wav_path, base_name, config)
+        metadata, cover_source = enrich_and_search_cover(wav_path, base_name, config, original_wav_path)
         
         search_artist = metadata.get('artist', '')
         search_title = metadata.get('title', '')

@@ -160,18 +160,19 @@ def search_all_sources(artist: str, title: str, filename: str = "") -> tuple[dic
     return result_metadata, cover_url
 
 
-def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[str]]:
+def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any], original_wav_path: str = None) -> Tuple[Dict[str, Any], Optional[str]]:
     """Combined function: Online metadata lookup + enrich + cover search.
     
     Cover priority:
     1. Embedded cover in WAV file (extract with ffmpeg)
-    2. Local cover file in same folder
+    2. Local cover file in same folder (uses original path)
     3. Online cover (Deezer → MusicBrainz → Bandcamp)
     
     Args:
-        wav_path: Path to the WAV file
+        wav_path: Path to the WAV file (may be temp copy)
         filename: Original filename for fallback
         config: Configuration dict
+        original_wav_path: Original WAV path for local cover search
         
     Returns:
         Tuple of (metadata_dict, cover_source)
@@ -241,21 +242,30 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
         if enriched:
             metadata.update(enriched)
     
-    cover_source = _find_cover(wav_path, artist, title)
+    cover_path_for_local = original_wav_path if original_wav_path else wav_path
+    cover_source = _find_cover(wav_path, artist, title, cover_path_for_local)
     
     return metadata, cover_source
 
 
-def _find_cover(wav_path: str, artist: str, title: str) -> Optional[str]:
+def _find_cover(wav_path: str, artist: str, title: str, original_wav_path: str = None) -> Optional[str]:
     """Find cover with priority: embedded in WAV → local → online.
+    
+    Args:
+        wav_path: Path to the WAV file (may be temp copy)
+        artist: Artist name
+        title: Track title
+        original_wav_path: Original WAV path for local cover search (if different from wav_path)
     
     Returns:
         - Local file path if found
-        - URL string (http://...) for download if online found
+        - URL string (http://...) for online download
         - None if no cover
     """
     from audio_processing import find_local_cover, run_cmd as audio_run_cmd, download_cover
     from pathlib import Path
+    
+    path_for_local_search = original_wav_path if original_wav_path else wav_path
     
     file_hash = hash(wav_path) % 1000000
     temp_cover = f'/tmp/cover_{file_hash}.jpg'
@@ -266,7 +276,7 @@ def _find_cover(wav_path: str, artist: str, title: str) -> Optional[str]:
         logger.info(f"  Cover: Extracted from source")
         return temp_cover
     
-    local_cover = find_local_cover(wav_path)
+    local_cover = find_local_cover(path_for_local_search)
     if local_cover:
         if local_cover.lower().endswith('.png'):
             png_cover = f'/tmp/cover_{file_hash}.png'
