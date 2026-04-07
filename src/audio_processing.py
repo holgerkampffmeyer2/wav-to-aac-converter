@@ -75,7 +75,7 @@ def embed_cover(input_path: str, cover_path: str, final_path: str, fmt: str) -> 
     if fmt == 'mp3':
         cmd = f'ffmpeg -y -i "{input_path}" -i "{cover_path}" -map 0:a -map 1:v -c copy -id3v2_version 3 -metadata:s:v title="Album cover" -metadata:s:v comment="Cover (front)" "{final_path}" 2>/dev/null'
     elif fmt == 'm4a':
-        cmd = f'ffmpeg -y -i "{input_path}" -i "{cover_path}" -map 0:a -map 1:v -c copy -movflags +use_metadata_tags -metadata:s:v title="Album cover" -metadata:s:v comment="Cover (front)" "{final_path}" 2>/dev/null'
+        cmd = f'ffmpeg -y -i "{input_path}" -i "{cover_path}" -c copy -map 0:a -map 1:v -disposition:v:0 attached_pic "{final_path}" 2>/dev/null'
     else:
         return False
     
