@@ -105,7 +105,18 @@ def load_config() -> Dict[str, Any]:
         "loudnorm": True,
         "embed_cover": True,
         "retry_attempts": 3,
-        "timeout_seconds": 30
+        "timeout_seconds": 30,
+        "fuzzy_threshold": 0.8,
+        "online_lookup": {
+            "enabled": True,
+            "sources": ["itunes", "bandcamp", "musicbrainz", "deezer"],
+            "fallback_to_filename": True
+        },
+        "enrich_metadata": {
+            "enabled": True,
+            "write_tags": ["label", "genre", "album", "year", "track_number"],
+            "label_source_tag": "label"
+        }
     }
     try:
         if config_path.exists():

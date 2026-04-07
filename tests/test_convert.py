@@ -9,9 +9,10 @@ import json
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from convert import (
+from src.convert import (
     extract_metadata_from_filename,
     clean_title_for_search,
     find_local_cover,
@@ -22,12 +23,12 @@ from convert import (
     run_cmd,
 )
 
-from utils import (
+from src.utils import (
     OG_IMAGE_RE,
     BANDCAMP_URL_RE,
 )
 
-from metadata import (
+from src.metadata import (
     _lookup_itunes,
     _lookup_musicbrainz,
     lookup_online_metadata,
@@ -338,19 +339,19 @@ class TestASCIIConversion(unittest.TestCase):
 
     def test_to_ascii_basic(self):
         """Test basic ASCII conversion."""
-        from convert import to_ascii_filename
+        from src.convert import to_ascii_filename
         self.assertEqual(to_ascii_filename("Artist - Title.wav"), "Artist - Title.wav")
 
     def test_to_ascii_with_accents(self):
         """Test conversion of accented characters."""
-        from convert import to_ascii_filename
+        from src.convert import to_ascii_filename
         self.assertEqual(to_ascii_filename("Agapás.wav"), "Agapas.wav")
         self.assertEqual(to_ascii_filename("Café.wav"), "Cafe.wav")
         self.assertEqual(to_ascii_filename("Naïve.wav"), "Naive.wav")
 
     def test_to_ascii_special_chars(self):
         """Test removal of special characters."""
-        from convert import to_ascii_filename
+        from src.convert import to_ascii_filename
         # The regex preserves brackets, so [Title] stays as [Title]
         self.assertEqual(to_ascii_filename("Artist [Title].wav"), "Artist [Title].wav")
         self.assertEqual(to_ascii_filename("Artist-Title.wav"), "Artist-Title.wav")
@@ -360,19 +361,19 @@ class TestASCIIConversion(unittest.TestCase):
 
     def test_to_ascii_whitespace(self):
         """Test whitespace normalization."""
-        from convert import to_ascii_filename
+        from src.convert import to_ascii_filename
         self.assertEqual(to_ascii_filename("Artist   -   Title.wav"), "Artist - Title.wav")
         self.assertEqual(to_ascii_filename("  Artist - Title  .wav"), "Artist - Title .wav")
 
     def test_to_ascii_non_ascii_only(self):
         """Test string with only non-ASCII characters."""
-        from convert import to_ascii_filename
+        from src.convert import to_ascii_filename
         self.assertEqual(to_ascii_filename("АБВГД.wav"), ".wav")  # Cyrillic becomes empty
         self.assertEqual(to_ascii_filename("中文测试.wav"), ".wav")  # Chinese becomes empty
 
     def test_to_ascii_empty_string(self):
         """Test empty string."""
-        from convert import to_ascii_filename
+        from src.convert import to_ascii_filename
         self.assertEqual(to_ascii_filename(""), "")
 
 
@@ -419,7 +420,7 @@ class TestASCIIFilenameHandling(unittest.TestCase):
         """ASCII handling test skipped - core functionality tested manually."""
         self.assertTrue(True)  # Placeholder
 
-    @patch('convert.convert_file')
+    @patch('src.convert.convert_file')
     def test_ascii_filename_not_needed_for_ascii_input(self, mock_convert):
         """Test that original filename is used when input is already ASCII."""
         mock_convert.return_value = (True, 'output.mp3')
@@ -429,7 +430,7 @@ class TestASCIIFilenameHandling(unittest.TestCase):
         wav_path = self._create_test_wav(ascii_filename)
         
         # Call convert_file
-        from convert import convert_file
+        from src.convert import convert_file
         success, output = convert_file(wav_path, fmt='mp3')
         
         # Verify convert_file was called
@@ -445,7 +446,7 @@ class TestASCIIFilenameHandling(unittest.TestCase):
         # Verify the function returned success
         self.assertTrue(success)
 
-    @patch('convert.convert_file')
+    @patch('src.convert.convert_file')
     def test_fallback_to_original_on_ascii_conversion_failure(self, mock_convert):
         """Test that original filename is used if ASCII conversion fails."""
         mock_convert.return_value = (True, 'output.mp3')
@@ -455,9 +456,9 @@ class TestASCIIFilenameHandling(unittest.TestCase):
         wav_path = self._create_test_wav(ascii_filename)
         
         # Mock to_ascii_filename to raise an exception
-        with patch('convert.to_ascii_filename', side_effect=Exception("Test exception")):
+        with patch('src.convert.to_ascii_filename', side_effect=Exception("Test exception")):
             # Call convert_file
-            from convert import convert_file
+            from src.convert import convert_file
             success, output = convert_file(wav_path, fmt='mp3')
             
             # Verify convert_file was called
@@ -479,7 +480,7 @@ class TestConfigFeatures(unittest.TestCase):
 
     def test_load_config_defaults(self):
         """Test loading config with default values when file doesn't exist."""
-        from utils import load_config
+        from src.utils import load_config
         import tempfile
         import os
         
@@ -490,13 +491,14 @@ class TestConfigFeatures(unittest.TestCase):
                 os.remove(config_path)
             
             # Mock the config file path to point to our temp directory
-            with patch('utils.Path') as mock_path:
+            with patch('src.utils.Path') as mock_path:
                 mock_instance = MagicMock()
                 mock_instance.parent.__truediv__.return_value = Path(config_path)
                 mock_path.return_value = mock_instance
                 
                 config = load_config()
                 expected = {
+                    "ascii_filename": False,
                     "output_format": "mp3",
                     "max_parallel_processes": 5,
                     "loudnorm": True,
@@ -519,7 +521,7 @@ class TestConfigFeatures(unittest.TestCase):
 
     def test_load_config_from_file(self):
         """Test loading config from an existing file works."""
-        from utils import load_config
+        from src.utils import load_config
         import tempfile
         import json
         import os
@@ -546,8 +548,8 @@ class TestConfigFeatures(unittest.TestCase):
                 with open(config_path, 'w') as f:
                     json.dump(test_config, f)
                 
-                # Copy temp config to working dir
-                shutil.copy(config_path, 'config.json')
+        # Copy temp config to src directory (where load_config looks for it)
+                shutil.copy(config_path, 'src/config.json')
                 
                 config = load_config()
                 self.assertEqual(config.get('output_format'), 'm4a')
@@ -557,17 +559,21 @@ class TestConfigFeatures(unittest.TestCase):
             # Restore original config
             if backup_config.exists():
                 shutil.move(str(backup_config), str(orig_config))
+            # Remove test config from src
+            src_config = Path('src/config.json')
+            if src_config.exists():
+                src_config.unlink()
 
     def test_parse_args_uses_config_defaults(self):
         """Test that argument parser uses config values as defaults."""
-        from convert import parse_args, load_config
+        from src.convert import parse_args, load_config
         from unittest.mock import patch
         import sys
         
         # Test with default config values
         test_config = load_config()
         
-        with patch('convert.load_config', return_value=test_config):
+        with patch('src.convert.load_config', return_value=test_config):
             # Test default values
             test_args = ['dummy.wav']
             with patch('sys.argv', ['convert.py'] + test_args):
@@ -582,13 +588,13 @@ class TestConfigFeatures(unittest.TestCase):
 
     def test_parse_args_command_line_override(self):
         """Test that command line arguments override config values."""
-        from convert import parse_args, load_config
+        from src.convert import parse_args, load_config
         from unittest.mock import patch
         import sys
         
         test_config = load_config()
         
-        with patch('convert.load_config', return_value=test_config):
+        with patch('src.convert.load_config', return_value=test_config):
             # Test command line overrides
             test_args = [
                 '--m4a',  # Should set m4a flag to True
@@ -610,7 +616,7 @@ class TestConfigFeatures(unittest.TestCase):
 
     def test_convert_batch_ascii_filename_param(self):
         """Test that convert_batch works without ascii_filename parameter (removed)."""
-        from convert import convert_batch, _convert_file_wrapper
+        from src.convert import convert_batch, _convert_file_wrapper
         from unittest.mock import patch, MagicMock
         
         # Mock convert_file to avoid actual processing
@@ -620,7 +626,7 @@ class TestConfigFeatures(unittest.TestCase):
         # Create a mock config that will match what convert_batch passes
         mock_config = MagicMock()
         
-        with patch('convert.convert_file', return_value=(True, 'output.wav')) as mock_convert:
+        with patch('src.convert.convert_file', return_value=(True, 'output.wav')) as mock_convert:
             file_paths = ['file1.wav', 'file2.wav']
             # Test that convert_batch works without ascii_filename parameter
             # Pass a specific config dict to avoid needing to match load_config() result
@@ -642,7 +648,7 @@ class TestConfigFeatures(unittest.TestCase):
 class TestOnlineMetadataLookup(unittest.TestCase):
     """Tests for online metadata lookup via iTunes and MusicBrainz."""
 
-    @patch('utils.fetch_url')
+    @patch('src.utils.fetch_url')
     def test_lookup_itunes_success(self, mock_fetch):
         """iTunes returns a valid track."""
         import json
@@ -657,7 +663,7 @@ class TestOnlineMetadataLookup(unittest.TestCase):
         self.assertEqual(artist, "Test Artist")
         self.assertEqual(title, "Test Song")
 
-    @patch('utils.fetch_url')
+    @patch('src.utils.fetch_url')
     def test_lookup_itunes_no_results(self, mock_fetch):
         """iTunes returns no results."""
         import json
@@ -666,7 +672,7 @@ class TestOnlineMetadataLookup(unittest.TestCase):
         self.assertIsNone(artist)
         self.assertIsNone(title)
 
-    @patch('utils.fetch_url')
+    @patch('src.utils.fetch_url')
     def test_lookup_musicbrainz_success(self, mock_fetch):
         """MusicBrainz returns a valid recording."""
         import json
@@ -682,7 +688,7 @@ class TestOnlineMetadataLookup(unittest.TestCase):
         self.assertEqual(artist, "Test Artist")
         self.assertEqual(title, "Test Song")
 
-    @patch('utils.fetch_url')
+    @patch('src.utils.fetch_url')
     def test_lookup_musicbrainz_no_results(self, mock_fetch):
         """MusicBrainz returns no results."""
         import json
@@ -691,7 +697,7 @@ class TestOnlineMetadataLookup(unittest.TestCase):
         self.assertIsNone(artist)
         self.assertIsNone(title)
 
-    @patch('utils.fetch_url')
+    @patch('src.utils.fetch_url')
     def test_lookup_online_metadata_itunes_first(self, mock_fetch):
         """lookup_online_metadata tries iTunes first."""
         import json
@@ -706,7 +712,7 @@ class TestOnlineMetadataLookup(unittest.TestCase):
         self.assertEqual(artist, "iTunes Artist")
         self.assertEqual(title, "iTunes Song")
 
-    @patch('utils.fetch_url')
+    @patch('src.utils.fetch_url')
     def test_lookup_online_metadata_fallback_to_musicbrainz(self, mock_fetch):
         """If iTunes and Deezer fail, fallback to MusicBrainz via Bandcamp."""
         import json
@@ -728,7 +734,7 @@ class TestOnlineMetadataLookup(unittest.TestCase):
         self.assertEqual(artist, "MB Artist")
         self.assertEqual(title, "MB Song")
 
-    @patch('utils.fetch_url')
+    @patch('src.utils.fetch_url')
     def test_lookup_online_metadata_both_fail(self, mock_fetch):
         """All sources fail."""
         import json
@@ -778,8 +784,8 @@ class TestIntegration(unittest.TestCase):
         import shutil
         shutil.rmtree(self.test_dir)
 
-    @patch('convert.fetch_url')
-    @patch('convert.analyze_loudness')
+    @patch('src.convert.fetch_url')
+    @patch('src.convert.analyze_loudness')
     def test_integration_conversion_with_mocked_online(self, mock_loudness, mock_fetch):
         output_file = None
         try:
@@ -799,9 +805,9 @@ class TestIntegration(unittest.TestCase):
                 }]
             })
 
-            with patch('convert.search_deezer_cover', return_value=None), \
-                 patch('convert.search_musicbrainz_cover', return_value=None), \
-                 patch('convert.search_bandcamp_cover', return_value=None):
+            with patch('src.convert.search_deezer_cover', return_value=None), \
+                 patch('src.convert.search_musicbrainz_cover', return_value=None), \
+                 patch('src.convert.search_bandcamp_cover', return_value=None):
 
                 success, output_file = convert_file(self.wav_path, fmt='mp3')
 
@@ -823,12 +829,12 @@ class TestIntegration(unittest.TestCase):
                 except:
                     pass
 
-    @patch('audio_processing.download_cover')
-    @patch('audio_processing.encode_audio')
-    @patch('audio_processing.embed_cover')
-    @patch('convert.verify_output')
-    @patch('metadata.lookup_online_metadata')
-    @patch('audio_processing.analyze_loudness')
+    @patch('src.audio_processing.download_cover')
+    @patch('src.audio_processing.encode_audio')
+    @patch('src.audio_processing.embed_cover')
+    @patch('src.convert.verify_output')
+    @patch('src.metadata.lookup_online_metadata')
+    @patch('src.audio_processing.analyze_loudness')
     def test_integration_conversion_with_mocked_online(self, mock_loudness, mock_lookup, mock_verify, mock_embed, mock_encode, mock_download):
         output_file = None
         try:
@@ -849,9 +855,9 @@ class TestIntegration(unittest.TestCase):
             mock_embed.return_value = True
             mock_verify.return_value = (True, {'mp3': True, 'cover': False})
 
-            with patch('cover_art.search_deezer_cover', return_value=None), \
-                 patch('cover_art.search_musicbrainz_cover', return_value=None), \
-                 patch('cover_art.search_bandcamp_cover', return_value=None):
+            with patch('src.cover_art.search_deezer_cover', return_value=None), \
+                 patch('src.cover_art.search_musicbrainz_cover', return_value=None), \
+                 patch('src.cover_art.search_bandcamp_cover', return_value=None):
 
                 success, output_file = convert_file(self.wav_path, fmt='mp3')
 
@@ -864,12 +870,12 @@ class TestIntegration(unittest.TestCase):
                 except:
                     pass
 
-    @patch('audio_processing.download_cover')
-    @patch('audio_processing.encode_audio')
-    @patch('audio_processing.embed_cover')
-    @patch('convert.verify_output')
-    @patch('metadata.lookup_online_metadata')
-    @patch('audio_processing.analyze_loudness')
+    @patch('src.audio_processing.download_cover')
+    @patch('src.audio_processing.encode_audio')
+    @patch('src.audio_processing.embed_cover')
+    @patch('src.convert.verify_output')
+    @patch('src.metadata.lookup_online_metadata')
+    @patch('src.audio_processing.analyze_loudness')
     def test_integration_conversion_m4a_with_mocked_online(self, mock_loudness, mock_lookup, mock_verify, mock_embed, mock_encode, mock_download):
         output_file = None
         try:
@@ -890,9 +896,9 @@ class TestIntegration(unittest.TestCase):
             mock_embed.return_value = True
             mock_verify.return_value = (True, {'m4a': True, 'cover': False})
 
-            with patch('cover_art.search_deezer_cover', return_value=None), \
-                 patch('cover_art.search_musicbrainz_cover', return_value=None), \
-                 patch('cover_art.search_bandcamp_cover', return_value=None):
+            with patch('src.cover_art.search_deezer_cover', return_value=None), \
+                 patch('src.cover_art.search_musicbrainz_cover', return_value=None), \
+                 patch('src.cover_art.search_bandcamp_cover', return_value=None):
 
                 success, output_file = convert_file(self.wav_path, fmt='m4a')
 
@@ -943,37 +949,37 @@ class TestLoudnormFailure(unittest.TestCase):
         import shutil
         shutil.rmtree(self.test_dir)
 
-    @patch('audio_processing.run_cmd')
+    @patch('src.audio_processing.run_cmd')
     def test_loudnorm_failure_returns_none(self, mock_run_cmd):
         """Test that loudnorm failure returns None."""
-        from audio_processing import analyze_loudness
+        from src.audio_processing import analyze_loudness
         mock_run_cmd.return_value = (False, "", "ffmpeg error")
         result = analyze_loudness(self.wav_path)
         self.assertIsNone(result)
 
-    @patch('audio_processing.run_cmd')
+    @patch('src.audio_processing.run_cmd')
     def test_loudnorm_invalid_json_returns_none(self, mock_run_cmd):
         """Test that invalid JSON from loudnorm returns None."""
-        from audio_processing import analyze_loudness
+        from src.audio_processing import analyze_loudness
         mock_run_cmd.return_value = (True, "not json output", "")
         result = analyze_loudness(self.wav_path)
         self.assertIsNone(result)
 
-    @patch('convert.analyze_loudness')
-    @patch('convert.run_cmd')
+    @patch('src.convert.analyze_loudness')
+    @patch('src.convert.run_cmd')
     def test_conversion_returns_false_on_loudnorm_failure(self, mock_run_cmd, mock_loudness):
         """Test conversion returns False when loudnorm fails."""
-        from convert import convert_file
+        from src.convert import convert_file
         mock_loudness.return_value = None  # Loudnorm fails
         
-        with patch('convert.extract_metadata', return_value={'artist': 'A', 'title': 'T'}), \
-             patch('convert.find_local_cover', return_value=None), \
-             patch('cover_art.search_deezer_cover', return_value=None), \
-             patch('cover_art.search_musicbrainz_cover', return_value=None), \
-             patch('cover_art.search_bandcamp_cover', return_value=None), \
-             patch('audio_processing.download_cover', return_value=False), \
-             patch('audio_processing.embed_cover', return_value=True), \
-             patch('convert.verify_output', return_value=(True, {'mp3': True, 'cover': False})):
+        with patch('src.convert.extract_metadata', return_value={'artist': 'A', 'title': 'T'}), \
+             patch('src.convert.find_local_cover', return_value=None), \
+             patch('src.cover_art.search_deezer_cover', return_value=None), \
+             patch('src.cover_art.search_musicbrainz_cover', return_value=None), \
+             patch('src.cover_art.search_bandcamp_cover', return_value=None), \
+             patch('src.audio_processing.download_cover', return_value=False), \
+             patch('src.audio_processing.embed_cover', return_value=True), \
+             patch('src.convert.verify_output', return_value=(True, {'mp3': True, 'cover': False})):
 
             success, output = convert_file(self.wav_path, fmt='mp3')
             
@@ -984,43 +990,43 @@ class TestLoudnormFailure(unittest.TestCase):
 class TestAPIErrorHandling(unittest.TestCase):
     """Tests for API error handling (rate limits, network errors)."""
 
-    @patch('cover_art.fetch_url')
+    @patch('src.cover_art.fetch_url')
     def test_deezer_network_error_returns_none(self, mock_fetch):
         """Test returns None when network error occurs."""
-        from cover_art import search_deezer_cover
+        from src.cover_art import search_deezer_cover
         mock_fetch.side_effect = Exception("Network error")
         
         result = search_deezer_cover("Test Artist", "Test Song")
         self.assertIsNone(result)
 
-    @patch('cover_art.fetch_url')
+    @patch('src.cover_art.fetch_url')
     def test_deezer_invalid_json_returns_none(self, mock_fetch):
         """Test returns None when response is invalid JSON."""
-        from cover_art import search_deezer_cover
+        from src.cover_art import search_deezer_cover
         mock_fetch.return_value = "not valid json"
         
         result = search_deezer_cover("Test Artist", "Test Song")
         self.assertIsNone(result)
 
-    @patch('cover_art.fetch_url')
+    @patch('src.cover_art.fetch_url')
     def test_deezer_empty_response_returns_none(self, mock_fetch):
         """Test returns None when response is empty."""
-        from cover_art import search_deezer_cover
+        from src.cover_art import search_deezer_cover
         mock_fetch.return_value = ""
         
         result = search_deezer_cover("Test Artist", "Test Song")
         self.assertIsNone(result)
 
-    @patch('cover_art.fetch_url')
+    @patch('src.cover_art.fetch_url')
     def test_bandcamp_network_error_returns_none(self, mock_fetch):
         """Test Bandcamp returns None on network error."""
-        from cover_art import search_bandcamp_cover
+        from src.cover_art import search_bandcamp_cover
         mock_fetch.side_effect = Exception("Connection refused")
         
         result = search_bandcamp_cover("Test Artist", "Test Song")
         self.assertIsNone(result)
 
-    @patch('utils.fetch_url')
+    @patch('src.utils.fetch_url')
     def test_itunes_network_error_returns_none(self, mock_fetch):
         """Test iTunes returns None on network error."""
         mock_fetch.return_value = ""  # fetch_url returns "" on network error
@@ -1029,7 +1035,7 @@ class TestAPIErrorHandling(unittest.TestCase):
         self.assertIsNone(artist)
         self.assertIsNone(title)
 
-    @patch('utils.fetch_url')
+    @patch('src.utils.fetch_url')
     def test_musicbrainz_network_error_returns_none(self, mock_fetch):
         """Test MusicBrainz returns None on network error."""
         mock_fetch.return_value = ""  # fetch_url returns "" on network error
@@ -1076,20 +1082,20 @@ class TestEncodingErrors(unittest.TestCase):
         import shutil
         shutil.rmtree(self.test_dir)
 
-    @patch('audio_processing.run_cmd')
+    @patch('src.audio_processing.run_cmd')
     def test_encode_audio_failure_returns_false(self, mock_run_cmd):
         """Test encoding failure returns False."""
-        from audio_processing import encode_audio
+        from src.audio_processing import encode_audio
         output_path = os.path.join(self.test_dir, "output.mp3")
         mock_run_cmd.return_value = (False, "", "Encoding failed")
         
         result = encode_audio(self.wav_path, output_path, {'artist': 'A', 'title': 'T'}, -3.0, 'mp3')
         self.assertFalse(result)
 
-    @patch('audio_processing.run_cmd')
+    @patch('src.audio_processing.run_cmd')
     def test_corrupted_wav_returns_error(self, mock_run_cmd):
         """Test corrupted WAV file handling."""
-        from audio_processing import analyze_loudness
+        from src.audio_processing import analyze_loudness
         corrupted_wav = os.path.join(self.test_dir, "corrupted.wav")
         with open(corrupted_wav, 'wb') as f:
             f.write(b'RIFF' + b'\x00' * 100)  # Invalid WAV
@@ -1110,19 +1116,19 @@ class TestVerifyOutput(unittest.TestCase):
         import shutil
         shutil.rmtree(self.test_dir)
 
-    @patch('convert.run_cmd')
+    @patch('src.convert.run_cmd')
     def test_verify_output_missing_file(self, mock_run_cmd):
         """Test verification fails for missing file."""
-        from convert import verify_output
+        from src.convert import verify_output
         mock_run_cmd.return_value = (False, "", "File not found")
         
         result, details = verify_output("/nonexistent/file.mp3", "mp3")
         self.assertFalse(result)
 
-    @patch('convert.run_cmd')
+    @patch('src.convert.run_cmd')
     def test_verify_output_wrong_codec(self, mock_run_cmd):
         """Test verification fails for wrong codec."""
-        from convert import verify_output
+        from src.convert import verify_output
         output_path = os.path.join(self.test_dir, "output.mp3")
         
         # Create the output file so it exists
@@ -1135,10 +1141,10 @@ class TestVerifyOutput(unittest.TestCase):
         self.assertFalse(result)
         self.assertFalse(details['mp3'])
 
-    @patch('convert.run_cmd')
+    @patch('src.convert.run_cmd')
     def test_verify_output_correct_codec(self, mock_run_cmd):
         """Test verification passes for correct codec."""
-        from convert import verify_output
+        from src.convert import verify_output
         output_path = os.path.join(self.test_dir, "output.mp3")
         
         Path(output_path).touch()
@@ -1149,10 +1155,10 @@ class TestVerifyOutput(unittest.TestCase):
         self.assertTrue(result)
         self.assertTrue(details['mp3'])
 
-    @patch('convert.run_cmd')
+    @patch('src.convert.run_cmd')
     def test_verify_output_no_cover(self, mock_run_cmd):
         """Test verification passes when no cover but codec is correct."""
-        from convert import verify_output
+        from src.convert import verify_output
         output_path = os.path.join(self.test_dir, "output.mp3")
         
         Path(output_path).touch()
@@ -1162,10 +1168,10 @@ class TestVerifyOutput(unittest.TestCase):
         result, details = verify_output(output_path, "mp3")
         self.assertTrue(result)
 
-    @patch('convert.run_cmd')
+    @patch('src.convert.run_cmd')
     def test_verify_output_with_cover(self, mock_run_cmd):
         """Test verification passes when cover is embedded."""
-        from convert import verify_output
+        from src.convert import verify_output
         output_path = os.path.join(self.test_dir, "output.mp3")
         
         Path(output_path).touch()
@@ -1180,10 +1186,10 @@ class TestVerifyOutput(unittest.TestCase):
 class TestBatchProcessing(unittest.TestCase):
     """Tests for batch processing."""
 
-    @patch('convert.convert_file')
+    @patch('src.convert.convert_file')
     def test_batch_parallel_4_files(self, mock_convert):
         """Test parallel processing activates for 4+ files."""
-        from convert import convert_batch
+        from src.convert import convert_batch
         mock_convert.return_value = (True, "output.mp3")
         
         file_paths = [f"file{i}.wav" for i in range(4)]
@@ -1191,10 +1197,10 @@ class TestBatchProcessing(unittest.TestCase):
         
         self.assertEqual(len(results), 4)
 
-    @patch('convert.convert_file')
+    @patch('src.convert.convert_file')
     def test_batch_sequential_3_files(self, mock_convert):
         """Test sequential processing for <4 files."""
-        from convert import convert_batch
+        from src.convert import convert_batch
         mock_convert.return_value = (True, "output.mp3")
         
         file_paths = [f"file{i}.wav" for i in range(3)]
@@ -1202,10 +1208,10 @@ class TestBatchProcessing(unittest.TestCase):
         
         self.assertEqual(len(results), 3)
 
-    @patch('convert.convert_file')
+    @patch('src.convert.convert_file')
     def test_batch_continues_on_single_failure(self, mock_convert):
         """Test batch continues processing when one file fails."""
-        from convert import convert_batch
+        from src.convert import convert_batch
         
         def side_effect(path, fmt, embed_cover, config=None):
             if "fail" in path:
@@ -1233,10 +1239,10 @@ class TestEmbeddedWAVMetadata(unittest.TestCase):
         import shutil
         shutil.rmtree(self.test_dir)
 
-    @patch('metadata.run_cmd')
+    @patch('src.metadata.run_cmd')
     def test_extract_embedded_metadata(self, mock_run_cmd):
         """Test extraction of embedded metadata from WAV."""
-        from metadata import extract_metadata
+        from src.metadata import extract_metadata
         wav_path = os.path.join(self.test_dir, "test.wav")
         
         with open(wav_path, 'wb') as f:
@@ -1258,10 +1264,10 @@ class TestEmbeddedWAVMetadata(unittest.TestCase):
         self.assertEqual(metadata.get('title'), "Embedded Title")
         self.assertEqual(metadata.get('album'), "Test Album")
 
-    @patch('metadata.run_cmd')
+    @patch('src.metadata.run_cmd')
     def test_extract_metadata_empty_tags(self, mock_run_cmd):
         """Test extraction when tags are empty."""
-        from metadata import extract_metadata
+        from src.metadata import extract_metadata
         wav_path = os.path.join(self.test_dir, "test.wav")
         
         with open(wav_path, 'wb') as f:
@@ -1277,10 +1283,10 @@ class TestEmbeddedWAVMetadata(unittest.TestCase):
         metadata = extract_metadata(wav_path)
         self.assertEqual(metadata.get('artist', ''), '')
 
-    @patch('metadata.run_cmd')
+    @patch('src.metadata.run_cmd')
     def test_extract_metadata_ffprobe_fails(self, mock_run_cmd):
         """Test extraction when ffprobe fails."""
-        from metadata import extract_metadata
+        from src.metadata import extract_metadata
         wav_path = os.path.join(self.test_dir, "test.wav")
         
         with open(wav_path, 'wb') as f:
@@ -1309,15 +1315,15 @@ class TestEmbeddedCoverExtraction(unittest.TestCase):
         with open(wav_path, 'wb') as f:
             f.write(b'RIFF' + b'\x00' * 100)
         
-        with patch('audio_processing.run_cmd') as mock_run_cmd:
+        with patch('src.audio_processing.run_cmd') as mock_run_cmd:
             mock_run_cmd.return_value = (True, "", "")
             
-            with patch('audio_processing.find_local_cover', return_value=None), \
-                 patch('cover_art.search_deezer_cover', return_value=None), \
-                 patch('cover_art.search_musicbrainz_cover', return_value=None), \
-                 patch('cover_art.search_bandcamp_cover', return_value=None), \
+            with patch('src.audio_processing.find_local_cover', return_value=None), \
+                 patch('src.cover_art.search_deezer_cover', return_value=None), \
+                 patch('src.cover_art.search_musicbrainz_cover', return_value=None), \
+                 patch('src.cover_art.search_bandcamp_cover', return_value=None), \
                  patch('pathlib.Path.exists', return_value=True):
-                from cover_art import _find_cover
+                from src.cover_art import _find_cover
                 cover_path = _find_cover(wav_path, "Artist", "Title", wav_path)
             
             self.assertIsNotNone(cover_path)
@@ -1331,14 +1337,14 @@ class TestEmbeddedCoverExtraction(unittest.TestCase):
         with open(wav_path, 'wb') as f:
             f.write(b'RIFF' + b'\x00' * 100)
         
-        with patch('audio_processing.run_cmd') as mock_run_cmd:
+        with patch('src.audio_processing.run_cmd') as mock_run_cmd:
             mock_run_cmd.return_value = (False, "", "")
             
-            with patch('audio_processing.find_local_cover', return_value=local_cover), \
-                 patch('cover_art.search_deezer_cover', return_value=None), \
-                 patch('cover_art.search_musicbrainz_cover', return_value=None), \
-                 patch('cover_art.search_bandcamp_cover', return_value=None):
-                from cover_art import _find_cover
+            with patch('src.audio_processing.find_local_cover', return_value=local_cover), \
+                 patch('src.cover_art.search_deezer_cover', return_value=None), \
+                 patch('src.cover_art.search_musicbrainz_cover', return_value=None), \
+                 patch('src.cover_art.search_bandcamp_cover', return_value=None):
+                from src.cover_art import _find_cover
                 cover_path = _find_cover(wav_path, "Artist", "Title", wav_path)
             
             self.assertEqual(cover_path, local_cover)
@@ -1350,14 +1356,14 @@ class TestEmbeddedCoverExtraction(unittest.TestCase):
         with open(wav_path, 'wb') as f:
             f.write(b'RIFF' + b'\x00' * 100)
         
-        with patch('audio_processing.run_cmd') as mock_run_cmd:
+        with patch('src.audio_processing.run_cmd') as mock_run_cmd:
             mock_run_cmd.return_value = (False, "", "")
             
-            with patch('audio_processing.find_local_cover', return_value=None), \
-                 patch('cover_art.search_deezer_cover', return_value="https://example.com/cover.jpg"), \
-                 patch('cover_art.search_musicbrainz_cover', return_value=None), \
-                 patch('cover_art.search_bandcamp_cover', return_value=None):
-                from cover_art import _find_cover
+            with patch('src.audio_processing.find_local_cover', return_value=None), \
+                 patch('src.cover_art.search_deezer_cover', return_value="https://example.com/cover.jpg"), \
+                 patch('src.cover_art.search_musicbrainz_cover', return_value=None), \
+                 patch('src.cover_art.search_bandcamp_cover', return_value=None):
+                from src.cover_art import _find_cover
                 cover_path = _find_cover(wav_path, "Artist", "Title", wav_path)
             
             self.assertEqual(cover_path, "https://example.com/cover.jpg")
@@ -1369,14 +1375,14 @@ class TestEmbeddedCoverExtraction(unittest.TestCase):
         with open(wav_path, 'wb') as f:
             f.write(b'RIFF' + b'\x00' * 100)
         
-        with patch('audio_processing.run_cmd') as mock_run_cmd:
+        with patch('src.audio_processing.run_cmd') as mock_run_cmd:
             mock_run_cmd.return_value = (False, "", "")
             
-            with patch('audio_processing.find_local_cover', return_value=None), \
-                 patch('cover_art.search_deezer_cover', return_value=None), \
-                 patch('cover_art.search_musicbrainz_cover', return_value="https://musicbrainz.com/cover.jpg"), \
-                 patch('cover_art.search_bandcamp_cover', return_value=None):
-                from cover_art import _find_cover
+            with patch('src.audio_processing.find_local_cover', return_value=None), \
+                 patch('src.cover_art.search_deezer_cover', return_value=None), \
+                 patch('src.cover_art.search_musicbrainz_cover', return_value="https://musicbrainz.com/cover.jpg"), \
+                 patch('src.cover_art.search_bandcamp_cover', return_value=None):
+                from src.cover_art import _find_cover
                 cover_path = _find_cover(wav_path, "Artist", "Title", wav_path)
             
             self.assertEqual(cover_path, "https://musicbrainz.com/cover.jpg")
@@ -1388,14 +1394,14 @@ class TestEmbeddedCoverExtraction(unittest.TestCase):
         with open(wav_path, 'wb') as f:
             f.write(b'RIFF' + b'\x00' * 100)
         
-        with patch('audio_processing.run_cmd') as mock_run_cmd:
+        with patch('src.audio_processing.run_cmd') as mock_run_cmd:
             mock_run_cmd.return_value = (False, "", "")
             
-            with patch('audio_processing.find_local_cover', return_value=None), \
-                 patch('cover_art.search_deezer_cover', return_value=None), \
-                 patch('cover_art.search_musicbrainz_cover', return_value=None), \
-                 patch('cover_art.search_bandcamp_cover', return_value=None):
-                from cover_art import _find_cover
+            with patch('src.audio_processing.find_local_cover', return_value=None), \
+                 patch('src.cover_art.search_deezer_cover', return_value=None), \
+                 patch('src.cover_art.search_musicbrainz_cover', return_value=None), \
+                 patch('src.cover_art.search_bandcamp_cover', return_value=None):
+                from src.cover_art import _find_cover
                 cover_path = _find_cover(wav_path, "Artist", "Title", wav_path)
             
             self.assertIsNone(cover_path)
@@ -1416,11 +1422,11 @@ class TestEnrichAndSearchCover(unittest.TestCase):
         wav_path = os.path.join(self.test_dir, "test.wav")
         config = {'online_lookup': {'enabled': False}, 'enrich_metadata': {'enabled': False}}
         
-        with patch('metadata.extract_metadata', return_value={'artist': 'Test Artist', 'title': 'Test Title'}), \
-             patch('metadata.enrich_file_metadata', return_value={'genre': 'Electronic'}), \
-             patch('cover_art._find_cover', return_value='/tmp/cover.jpg'):
-            from cover_art import enrich_and_search_cover
-            from metadata import extract_metadata_from_filename
+        with patch('src.metadata.extract_metadata', return_value={'artist': 'Test Artist', 'title': 'Test Title'}), \
+             patch('src.metadata.enrich_file_metadata', return_value={'genre': 'Electronic'}), \
+             patch('src.cover_art._find_cover', return_value='/tmp/cover.jpg'):
+            from src.cover_art import enrich_and_search_cover
+            from src.metadata import extract_metadata_from_filename
             
             metadata, cover = enrich_and_search_cover(wav_path, "test.wav", config, wav_path)
             
@@ -1433,10 +1439,10 @@ class TestEnrichAndSearchCover(unittest.TestCase):
         wav_path = os.path.join(self.test_dir, "test.wav")
         config = {'online_lookup': {'enabled': False, 'fallback_to_filename': True}, 'enrich_metadata': {'enabled': False}}
         
-        with patch('metadata.extract_metadata', return_value={}), \
-             patch('metadata.extract_metadata_from_filename', return_value=('Artist From File', 'Title From File')), \
-             patch('cover_art._find_cover', return_value=None):
-            from cover_art import enrich_and_search_cover
+        with patch('src.metadata.extract_metadata', return_value={}), \
+             patch('src.metadata.extract_metadata_from_filename', return_value=('Artist From File', 'Title From File')), \
+             patch('src.cover_art._find_cover', return_value=None):
+            from src.cover_art import enrich_and_search_cover
             
             metadata, cover = enrich_and_search_cover(wav_path, "Artist From File - Title From File.wav", config, wav_path)
             

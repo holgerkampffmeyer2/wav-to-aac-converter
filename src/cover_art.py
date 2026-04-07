@@ -6,7 +6,7 @@ import logging
 from typing import Optional, Dict, Any, Tuple
 from urllib.parse import quote
 
-from utils import (
+from src.utils import (
     DEEZER_API_URL,
     MUSICBRAINZ_SEARCH_URL,
     MUSICBRAINZ_COVER_URL,
@@ -132,7 +132,7 @@ def search_all_sources(artist: str, title: str, filename: str = "") -> tuple[dic
     Returns:
         tuple: (metadata dict, cover_url or None)
     """
-    from utils import extract_metadata_from_filename
+    from .metadata import extract_metadata_from_filename
     
     result_metadata: Dict[str, Any] = {}
     cover_url: Optional[str] = None
@@ -181,7 +181,7 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
         - URL string (http://...) for online download
         - None if no cover found
     """
-    from metadata import (
+    from .metadata import (
         extract_metadata,
         lookup_online_metadata,
         extract_metadata_from_filename,
@@ -190,7 +190,7 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
         get_genre_online,
         get_additional_metadata_online
     )
-    from audio_processing import find_local_cover, run_cmd as audio_run_cmd
+    from .audio_processing import find_local_cover, run_cmd as audio_run_cmd
     from pathlib import Path
     
     online_lookup_enabled = config.get('online_lookup', {}).get('enabled', True)
@@ -262,7 +262,7 @@ def _find_cover(wav_path: str, artist: str, title: str, original_wav_path: str =
         - URL string (http://...) for online download
         - None if no cover
     """
-    from audio_processing import find_local_cover, run_cmd as audio_run_cmd, download_cover
+    from .audio_processing import find_local_cover, run_cmd as audio_run_cmd, download_cover
     from pathlib import Path
     
     path_for_local_search = original_wav_path if original_wav_path else wav_path

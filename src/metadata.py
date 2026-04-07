@@ -10,7 +10,7 @@ from typing import Optional, Tuple, Dict, Any
 from difflib import SequenceMatcher
 from functools import lru_cache
 
-from utils import (
+from src.utils import (
     ITUNES_SEARCH_URL,
     MUSICBRAINZ_LOOKUP_URL,
     run_cmd as util_run_cmd,
@@ -121,7 +121,7 @@ def _lookup_itunes(term: str):
     config = load_config()
     threshold = config.get('fuzzy_threshold', 0.8)
     
-    from utils import fetch_url
+    from .utils import fetch_url
     
     term_quoted = quote(term)
     url = f"{ITUNES_SEARCH_URL}{term_quoted}&entity=song&limit=10"
@@ -176,7 +176,7 @@ def _lookup_musicbrainz(term: str):
     if not term:
         return None, None
     
-    from utils import fetch_url
+    from .utils import fetch_url
     
     term_quoted = quote(term)
     url = f"{MUSICBRAINZ_LOOKUP_URL}recording={term_quoted}&fmt=json&limit=5"
@@ -217,7 +217,7 @@ def _lookup_bandcamp(term: str):
     if not term:
         return None, None
     
-    from utils import fetch_url, clean_title_for_search
+    from .utils import fetch_url, clean_title_for_search
     
     cleaned_term = clean_title_for_search(term)
     if not cleaned_term:
@@ -229,7 +229,7 @@ def _lookup_bandcamp(term: str):
         return None, None
     
     try:
-        from utils import BANDCAMP_URL_RE
+        from .utils import BANDCAMP_URL_RE
         match = BANDCAMP_URL_RE.search(content)
         if match:
             bandcamp_url = match.group(0).split('"')[0].split('&')[0]
@@ -254,7 +254,7 @@ def _lookup_deezer(term: str):
     if not term:
         return None, None
     
-    from utils import fetch_url
+    from .utils import fetch_url
     
     try:
         query = quote(term)
@@ -448,7 +448,7 @@ def _normalize_genre(genre: str) -> str:
 
 def _get_genre_from_bandcamp(artist: str, title: str) -> Tuple[Optional[str], Optional[str]]:
     """Lookup genre and label via Bandcamp search."""
-    from utils import fetch_url
+    from .utils import fetch_url
     
     cache_key = f"{artist.lower()}:{title.lower()}"
     if cache_key in _genre_cache:
@@ -488,7 +488,7 @@ def _get_genre_from_bandcamp(artist: str, title: str) -> Tuple[Optional[str], Op
 
 def _try_direct_bandcamp_url(artist: str, title: str) -> Tuple[Optional[str], Optional[str]]:
     """Try to access Bandcamp page directly using artist name."""
-    from utils import fetch_url
+    from .utils import fetch_url
     
     artist_slug = artist.lower().replace(' ', '-').replace('&', '').replace("'", '').strip()
     title_slug = title.lower().replace(' ', '-').replace('(', '').replace(')', '').replace('[', '').replace(']', '').replace("'", '').replace('&', '').strip()

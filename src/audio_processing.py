@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 
-from utils import (
+from src.utils import (
     ENCODE_TIMEOUT,
     DEFAULT_BITRATE,
     COVER_DIMENSIONS,
