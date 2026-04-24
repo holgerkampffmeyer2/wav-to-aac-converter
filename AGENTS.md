@@ -65,7 +65,7 @@ Loudness Analysis → Enrich Metadata + Cover Search (combined) → Encoding →
 Note: Filename processing uses ASCII-converted versions to ensure compatibility with audio processing tools.
 
 ### Metadata Enrichment (configurable)
-When `enrich_metadata.enabled` is true (default), missing tags are written to the WAV file:
+When `metadata.enabled` is true (default), missing tags are written to the WAV file:
 - **label**: Looked up via iTunes (primary) or Bandcamp (fallback)
 - **genre**: Looked up via iTunes → Bandcamp → MusicBrainz
 - **album, year, track_number**: Looked up via iTunes
@@ -146,7 +146,7 @@ sudo apt install ffmpeg python3
 - **Cover Sources**: Source (embedded) → Local folder → Deezer → MusicBrainz → Bandcamp
 - **Retry Logic**: 3 attempts with exponential backoff
 - **Metadata Sources**: WAV tags → iTunes → Deezer → Bandcamp → MusicBrainz → filename parsing
-- **Enrichment Tags**: label, genre, album, year, track_number (if enrich_metadata enabled)
+- **Enrichment Tags**: label, genre, album, year, track_number (if metadata enabled)
 
 ## Testing
 

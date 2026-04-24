@@ -834,7 +834,7 @@ def enrich_file_metadata(wav_path: str, artist: str, title: str, config: Dict[st
         wav_path: Path to the WAV file
         artist: Artist name
         title: Track title
-        config: Configuration dict with enrich_metadata settings
+        config: Configuration dict with metadata settings
         current_metadata: Pre-extracted metadata to avoid duplicate ffprobe calls
         
     Returns:

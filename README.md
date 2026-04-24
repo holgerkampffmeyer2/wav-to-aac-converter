@@ -38,14 +38,11 @@ The converter can be configured using a `config.json` file in the same directory
   "retry_attempts": 3,
   "timeout_seconds": 30,
   "fuzzy_threshold": 0.8,
-  "online_lookup": {
+  "metadata": {
     "enabled": true,
     "sources": ["itunes", "bandcamp", "musicbrainz", "deezer"],
-    "fallback_to_filename": true
-  },
-  "enrich_metadata": {
-    "enabled": true,
-    "write_tags": ["label", "genre", "album", "year", "track_number"],
+    "fallback_to_filename": true,
+    "enrich_tags": ["label", "genre", "album", "year", "track_number"],
     "label_source_tag": "label"
   }
 }
@@ -59,12 +56,11 @@ The converter can be configured using a `config.json` file in the same directory
 - `retry_attempts`: Retry attempts for failed operations (default: 3)
 - `timeout_seconds`: Timeout in seconds for operations (default: 30)
 - `fuzzy_threshold`: Similarity threshold for fuzzy matching (0.0-1.0, default: 0.8)
-- `online_lookup.enabled`: Enable online metadata lookup (default: true)
-- `online_lookup.sources`: Online sources to use for metadata lookup (default: itunes, bandcamp, musicbrainz, deezer)
-- `online_lookup.fallback_to_filename`: Fallback to filename parsing if no metadata found (default: true)
-- `enrich_metadata.enabled`: Write missing metadata tags to file from online sources (default: true)
-- `enrich_metadata.write_tags`: Tags to write when enriching (default: label, genre, album, year, track_number)
-- `enrich_metadata.label_source_tag`: Tag name for label (default: label)
+- `metadata.enabled`: Enable online metadata lookup and enrichment (default: true)
+- `metadata.sources`: Online sources to use (default: itunes, bandcamp, musicbrainz, deezer)
+- `metadata.fallback_to_filename`: Fallback to filename parsing if no metadata found (default: true)
+- `metadata.enrich_tags`: Tags to write when enriching (default: label, genre, album, year, track_number)
+- `metadata.label_source_tag`: Tag name for label (default: label)
 
 Note: Unicode filename to ASCII conversion is now automatic and always applied to ensure compatibility with audio processing tools.
 
@@ -170,7 +166,7 @@ sudo apt install ffmpeg python3
 3. **Filename parsing**: Fallback to heuristic parsing of filename ("Artist - Title")
 
 ### Metadata Enrichment
-When `enrich_metadata.enabled` is true, missing metadata tags are written to the WAV file from online sources:
+When `metadata.enabled` is true, missing metadata tags are written to the WAV file:
 - `label` (or custom tag via `label_source_tag`)
 - `genre`
 - `album`
