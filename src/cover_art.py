@@ -197,7 +197,6 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
     fallback_to_filename = config.get('metadata', {}).get('fallback_to_filename', True)
     
     metadata = {}
-    cover_source = None
     artist = None
     title = None
     
@@ -226,7 +225,7 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
             metadata['title'] = title
             logger.info(f"  Online metadata: {artist} - {title}")
     
-    if not artist or not title:
+    if not artist and not title:
         if fallback_to_filename:
             raw_artist, raw_title = extract_metadata_from_filename(filename or Path(wav_path).stem)
             if not artist:

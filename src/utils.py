@@ -191,6 +191,20 @@ def clean_title_for_search(title: str) -> str:
 def fetch_url(url: str, timeout: int = DEFAULT_TIMEOUT, headers: Optional[Dict[str, str]] = None, method: str = 'GET', data: Optional[Dict[str, str]] = None) -> str:
     """Fetch URL content with configurable options."""
     from typing import Dict
+    from urllib.parse import urlparse
+    
+    # Validate URL before processing
+    try:
+        parsed = urlparse(url)
+        if not parsed.scheme or parsed.scheme not in ('http', 'https'):
+            logger.warning(f"Invalid URL scheme: {parsed.scheme}")
+            return ""
+        if not parsed.netloc:
+            logger.warning("Invalid URL: missing netloc")
+            return ""
+    except Exception as e:
+        logger.warning(f"URL parse error: {e}")
+        return ""
     
     default_headers: Dict[str, str] = {
         'User-Agent': USER_AGENT.strip('"'),

@@ -113,8 +113,15 @@ def extract_metadata(wav_path: str) -> Dict[str, Any]:
         return {}
 
 
+_itunes_cache = {}
+
+
 def _lookup_itunes(term: str):
     """Lookup track on iTunes Search API with fuzzy matching."""
+    cache_key = term.lower().strip()
+    if cache_key in _itunes_cache:
+        return _itunes_cache[cache_key]
+    
     if not term:
         return None, None
     
@@ -127,6 +134,7 @@ def _lookup_itunes(term: str):
     url = f"{ITUNES_SEARCH_URL}{term_quoted}&entity=song&limit=10"
     content = fetch_url(url)
     if not content:
+        _itunes_cache[cache_key] = (None, None)
         return None, None
     try:
         data = json.loads(content)
@@ -136,6 +144,7 @@ def _lookup_itunes(term: str):
             track_name = track.get("trackName", "")
             if track_name.lower() == term.lower():
                 artist = track.get("artistName")
+                _itunes_cache[cache_key] = (artist, track_name)
                 return artist, track_name
         
         # Try fuzzy matching against all track names
@@ -149,6 +158,7 @@ def _lookup_itunes(term: str):
                 # Find the full track info
                 for track in results:
                     if track.get("trackName") == matched_track_name:
+                        _itunes_cache[cache_key] = (track.get("artistName"), matched_track_name)
                         return track.get("artistName"), matched_track_name
             
             # Fallback: take first result with both artist and track
@@ -158,6 +168,7 @@ def _lookup_itunes(term: str):
                 if artist and track_name:
                     # Check if fuzzy matches
                     if _fuzzy_match(term, track_name, threshold):
+                        _itunes_cache[cache_key] = (artist, track_name)
                         return artist, track_name
             
             # Last resort: first result
@@ -165,9 +176,12 @@ def _lookup_itunes(term: str):
             artist = track.get("artistName")
             track_name = track.get("trackName")
             if artist and track_name:
+                _itunes_cache[cache_key] = (artist, track_name)
                 return artist, track_name
     except (json.JSONDecodeError, KeyError):
         pass
+    
+    _itunes_cache[cache_key] = (None, None)
     return None, None
 
 

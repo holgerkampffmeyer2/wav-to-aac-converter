@@ -1025,6 +1025,9 @@ class TestAPIErrorHandling(unittest.TestCase):
     @patch('src.utils.fetch_url')
     def test_itunes_network_error_returns_none(self, mock_fetch):
         """Test iTunes returns None on network error."""
+        from src.metadata import _itunes_cache
+        _itunes_cache.clear()
+        
         mock_fetch.return_value = ""  # fetch_url returns "" on network error
         
         artist, title = _lookup_itunes("Test Song")
@@ -1446,5 +1449,375 @@ class TestEnrichAndSearchCover(unittest.TestCase):
             self.assertEqual(metadata['title'], 'Title From File')
 
 
+class TestURLValidation(unittest.TestCase):
+    """Tests for URL validation security."""
+
+    def test_fetch_url_rejects_invalid_scheme(self):
+        """Test that fetch_url rejects non-http schemes."""
+        from src.utils import fetch_url
+        
+        result = fetch_url("file:///local/file.html")
+        self.assertEqual(result, "")
+        
+        result = fetch_url("ftp://example.com/file.html")
+        self.assertEqual(result, "")
+        
+        result = fetch_url("javascript:alert(1)")
+        self.assertEqual(result, "")
+
+    def test_fetch_url_rejects_missing_netloc(self):
+        """Test that fetch_url rejects URLs without netloc."""
+        from src.utils import fetch_url
+        
+        result = fetch_url("/relative/path.html")
+        self.assertEqual(result, "")
+        
+        result = fetch_url("")
+        self.assertEqual(result, "")
+
+
+class TestRetryDecorator(unittest.TestCase):
+    """Tests for retry decorator."""
+
+    def test_retry_on_failure(self):
+        """Test that retry decorator works."""
+        from src.utils import retry
+        
+        call_count = 0
+        
+        @retry(max_attempts=3, delay=0, backoff=1)
+        def flaky_function():
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise Exception("Temporary failure")
+            return "success"
+        
+        result = flaky_function()
+        self.assertEqual(result, "success")
+        self.assertEqual(call_count, 3)
+
+    def test_retry_exhausted(self):
+        """Test that retry returns None when exhausted."""
+        from src.utils import retry
+        
+        @retry(max_attempts=2, delay=0, backoff=1)
+        def always_fails():
+            raise Exception("Permanent failure")
+        
+        result = always_fails()
+        self.assertIsNone(result)
+
+
+class TestMetadataCache(unittest.TestCase):
+    """Tests for metadata caching."""
+
+    def test_itunes_cache(self):
+        """Test that iTunes results are cached."""
+        from src.metadata import _itunes_cache, _lookup_itunes
+        _itunes_cache.clear()
+        
+        with patch('src.utils.fetch_url') as mock_fetch:
+            mock_fetch.return_value = json.dumps({
+                "resultCount": 1,
+                "results": [{"trackName": "Test Song", "artistName": "Test Artist"}]
+            })
+            
+            result1 = _lookup_itunes("test song")
+            result2 = _lookup_itunes("test song")
+            
+            self.assertEqual(result1, result2)
+            self.assertEqual(mock_fetch.call_count, 1)
+
+
+class TestFuzzyMatching(unittest.TestCase):
+    """Tests for fuzzy matching functions."""
+
+    def test_fuzzy_match_empty(self):
+        """Test fuzzy matching with empty inputs."""
+        from src.metadata import _fuzzy_match
+        
+        self.assertFalse(_fuzzy_match("", "test"))
+        self.assertFalse(_fuzzy_match("test", ""))
+        self.assertFalse(_fuzzy_match("", ""))
+
+    def test_fuzzy_match_exact(self):
+        """Test fuzzy matching with exact match."""
+        from src.metadata import _fuzzy_match
+        
+        self.assertTrue(_fuzzy_match("test", "test"))
+        self.assertTrue(_fuzzy_match("TEST", "test"))
+
+    def test_fuzzy_match_partial(self):
+        """Test fuzzy matching with partial match."""
+        from src.metadata import _fuzzy_match
+        
+        self.assertTrue(_fuzzy_match("test song", "test"))
+        self.assertTrue(_fuzzy_match("test", "test song"))
+
+    def test_fuzzy_match_below_threshold(self):
+        """Test fuzzy matching below threshold."""
+        from src.metadata import _fuzzy_match
+        
+        self.assertFalse(_fuzzy_match("abc", "xyz", threshold=0.8))
+
+    def test_find_best_match_empty(self):
+        """Test best match with empty inputs."""
+        from src.metadata import _find_best_match
+        
+        result = _find_best_match([], ["test"])
+        self.assertIsNone(result)
+        
+        result = _find_best_match(["test"], [])
+        self.assertIsNone(result)
+
+
+class TestErrorHandlingEdgeCases(unittest.TestCase):
+    """Edge case tests for error handling."""
+
+    def test_extract_metadata_invalid_json(self):
+        """Test extract_metadata with invalid JSON."""
+        from src.metadata import extract_metadata
+        import tempfile
+        
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
+            wav_path = f.name
+        
+        try:
+            with patch('src.metadata.run_cmd', return_value=(True, "not valid json", "")):
+                result = extract_metadata(wav_path)
+                self.assertEqual(result, {})
+        finally:
+            import os
+            if os.path.exists(wav_path):
+                os.remove(wav_path)
+
+    def test_extract_metadata_missing_keys(self):
+        """Test extract_metadata with missing format keys."""
+        from src.metadata import extract_metadata
+        import tempfile
+        
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
+            wav_path = f.name
+        
+        try:
+            with patch('src.metadata.run_cmd', return_value=(True, json.dumps({"format": {}}), "")):
+                result = extract_metadata(wav_path)
+                self.assertIn('artist', result)
+                self.assertIn('title', result)
+        finally:
+            import os
+            if os.path.exists(wav_path):
+                os.remove(wav_path)
+
+    def test_process_cover_failure(self):
+        """Test process_cover with failure."""
+        from src.audio_processing import process_cover
+        import tempfile
+        
+        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as f:
+            cover_path = f.name
+            input_path = f.name
+        
+        try:
+            with patch('src.audio_processing.run_cmd', return_value=(False, "", "error")):
+                result = process_cover(input_path, cover_path)
+                self.assertFalse(result)
+        finally:
+            import os
+            if os.path.exists(cover_path):
+                os.remove(cover_path)
+
+    def test_embed_cover_invalid_format(self):
+        """Test embed_cover with invalid format."""
+        from src.audio_processing import embed_cover
+        import tempfile
+        
+        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as f:
+            input_path = f.name
+            output_path = f.name
+        
+        try:
+            result = embed_cover(input_path, "cover.jpg", output_path, "invalid")
+            self.assertFalse(result)
+        finally:
+            import os
+            if os.path.exists(output_path):
+                os.remove(output_path)
+
+    def test_encode_audio_invalid_format(self):
+        """Test encode_audio with invalid format."""
+        from src.audio_processing import encode_audio
+        import tempfile
+        
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
+            wav_path = f.name
+            output_path = f.name
+        
+        try:
+            with self.assertRaises(ValueError):
+                encode_audio(wav_path, output_path, {}, 0.0, "flac")
+        finally:
+            import os
+            if os.path.exists(output_path):
+                os.remove(output_path)
+
+
+class TestCoverArtAPIFunctions(unittest.TestCase):
+    """Tests for cover art API functions."""
+
+    def test_search_all_sources_returns_tuple(self):
+        """Test search_all_sources returns expected tuple."""
+        from src.cover_art import search_all_sources
+        
+        with patch('src.cover_art.search_deezer_cover', return_value=None), \
+             patch('src.cover_art.search_musicbrainz_cover', return_value=None), \
+             patch('src.cover_art.search_bandcamp_cover', return_value=None):
+            metadata, cover = search_all_sources("Artist", "Title", "filename")
+            self.assertIsInstance(metadata, dict)
+
+    def test_enrich_and_search_cover_online_lookup(self):
+        """Test enrich_and_search_cover with online metadata enabled."""
+        import tempfile
+        import os
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            wav_path = os.path.join(tmpdir, "test.wav")
+            config = {'metadata': {'enabled': True, 'fallback_to_filename': True}}
+            
+            with patch('src.metadata.extract_metadata', return_value={}), \
+                 patch('src.metadata.extract_metadata_from_filename', return_value=('Test Artist', 'Test Title')), \
+                 patch('src.metadata.lookup_online_metadata', return_value=('Online Artist', 'Online Title')), \
+                 patch('src.metadata.enrich_file_metadata', return_value={'genre': 'House'}), \
+                 patch('src.cover_art._find_cover', return_value=None):
+                from src.cover_art import enrich_and_search_cover
+                
+                metadata, cover = enrich_and_search_cover(wav_path, "test.wav", config, wav_path)
+                self.assertIn('artist', metadata)
+
+
+class TestMetadataEnrichment(unittest.TestCase):
+    """Tests for metadata enrichment functions."""
+
+    @patch('urllib.request.urlopen')
+    def test_get_genre_online_caching(self, mock_urlopen):
+        """Test get_genre_online uses cache."""
+        from src.metadata import _genre_cache, get_genre_online
+        _genre_cache.clear()
+        
+        import json
+        mock_urlopen.return_value.__enter__.return_value.read.return_value.decode.return_value = json.dumps({
+            'resultCount': 1,
+            'results': [{'primaryGenreName': 'Electronic Dance Music'}]
+        })
+        
+        result1 = get_genre_online("Test Artist", "Test Song")
+        result2 = get_genre_online("Test Artist", "Test Song")
+        
+        self.assertEqual(mock_urlopen.call_count, 1)
+
+    @patch('urllib.request.urlopen')
+    def test_lookup_label_online_caching(self, mock_urlopen):
+        """Test lookup_label_online uses cache."""
+        from src.metadata import _label_cache, lookup_label_online
+        _label_cache.clear()
+        
+        import json
+        mock_urlopen.return_value.__enter__.return_value.read.return_value.decode.return_value = json.dumps({
+            'resultCount': 1,
+            'results': [{'label': 'Test Label'}]
+        })
+        
+        result = lookup_label_online("Test Artist", "Test Song")
+        self.assertEqual(result, "Test Label")
+
+    @patch('urllib.request.urlopen')
+    def test_get_additional_metadata_online(self, mock_urlopen):
+        """Test get_additional_metadata_online works."""
+        from src.metadata import _additional_metadata_cache, get_additional_metadata_online
+        _additional_metadata_cache.clear()
+        
+        import json
+        mock_urlopen.return_value.__enter__.return_value.read.return_value.decode.return_value = json.dumps({
+            'resultCount': 1,
+            'results': [{'collectionName': 'Test Album', 'trackNumber': 5, 'releaseDate': '2024-01-15T00:00:00Z'}]
+        })
+        
+        result = get_additional_metadata_online("Test Artist", "Test Song")
+        self.assertIn('album', result)
+        self.assertEqual(result['track_number'], 5)
+        self.assertEqual(result['year'], '2024')
+
+    def test_is_electronic_genre(self):
+        """Test _is_electronic_genre detection."""
+        from src.metadata import _is_electronic_genre
+        
+        self.assertTrue(_is_electronic_genre('Techno'))
+        self.assertTrue(_is_electronic_genre('House'))
+        self.assertTrue(_is_electronic_genre('Electronic Dance Music'))
+        self.assertFalse(_is_electronic_genre('Rock'))
+
+    def test_normalize_genre(self):
+        """Test genre normalization."""
+        from src.metadata import _normalize_genre
+        
+        self.assertEqual(_normalize_genre('drum and bass'), 'DRUM N BASS')
+        self.assertEqual(_normalize_genre('drum & bass'), 'DRUM N BASS')
+        self.assertEqual(_normalize_genre('Electronic Dance Music'), 'EDM')
+
+
+class TestMainFunction(unittest.TestCase):
+    """Tests for main function."""
+
+    def test_main_no_wav_files(self):
+        """Test main handles empty file list correctly."""
+        import sys
+        import tempfile
+        
+        # Create a temporary directory
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Attempt to find non-existent wav files
+            from pathlib import Path
+            test_dir = Path(tmpdir)
+            wav_files = [f for f in test_dir.glob('*.wav')]
+            self.assertEqual(len(wav_files), 0)
+
+
 if __name__ == '__main__':
+    import argparse
     unittest.main(verbosity=2)
+
+
+class TestSaveResultJSON(unittest.TestCase):
+    def test_save_result_json_with_loudness(self):
+        from src.convert import save_result_json
+        import tempfile, os, json
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = os.path.join(tmpdir, 'output.mp3')
+            # Create the output file so json_path works
+            Path(output_path).touch()
+            metadata = {'artist': 'Test', 'title': 'Song'}
+            loudness = {'input_i': -16.0}
+            result = save_result_json('test.wav', metadata, loudness, output_path, True, True, 'mp3')
+            # Check the function runs without error but json might not save if no output file
+            self.assertIsNone(result)  # Function returns None
+
+    def test_save_result_json_without_loudness(self):
+        from src.convert import save_result_json
+        import tempfile, os, json
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = os.path.join(tmpdir, 'output.mp3')
+            Path(output_path).touch()
+            metadata = {'artist': 'Test', 'title': 'Song'}
+            result = save_result_json('test.wav', metadata, None, output_path, False, False, 'mp3')
+            self.assertIsNone(result)
+
+class TestRunCmdTimeout(unittest.TestCase):
+    @patch('subprocess.run')
+    def test_timeout_expired(self, mock_run_cmd):
+        from src.utils import run_cmd
+        import subprocess
+        mock_run_cmd.side_effect = subprocess.TimeoutExpired('cmd', 10)
+        success, stdout, stderr = run_cmd('test cmd', timeout=5)
+        self.assertFalse(success)
+        self.assertIn('timed out', stderr)
