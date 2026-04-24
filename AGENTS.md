@@ -172,3 +172,30 @@ The test suite covers:
 - Batch processing (parallel/sequential)
 - Edge cases (Unicode, special characters, empty values)
 - Metadata enrichment (label, genre, album, year, track_number)
+
+## File Structure
+
+```
+wav-to-aac-converter/
+├── .git/                  # Git repository
+├── .github/               # GitHub workflows
+├── .gitignore             # Git ignore rules
+├── assets/                # Images and static assets
+├── src/                   # Source code
+│   ├── __init__.py
+│   ├── audio_processing.py    # Loudness analysis & encoding
+│   ├── convert.py              # Main CLI script
+│   ├── cover_art.py           # Cover art extraction & embedding
+│   ├── metadata.py            # Metadata lookup & enrichment
+│   └── utils.py              # Utilities
+├── tests/                  # Test files
+│   └── test_convert.py
+├── AGENTS.md               # AI agent workflow instructions
+├── README.md               # This file
+├── LICENSE                # MIT license
+├── config.json            # Configuration file
+├── convert.py            # CLI entry point (wrapper)
+├── pyproject.toml        # Python project config
+├── *.wav                 # Source files
+└── *.mp3 / *.m4a        # Converted output
+```
