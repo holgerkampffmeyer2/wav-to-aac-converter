@@ -498,7 +498,6 @@ class TestConfigFeatures(unittest.TestCase):
                 
                 config = load_config()
                 expected = {
-                    "ascii_filename": False,
                     "output_format": "mp3",
                     "max_parallel_processes": 5,
                     "loudnorm": True,

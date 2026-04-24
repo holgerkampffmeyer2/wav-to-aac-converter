@@ -259,7 +259,7 @@ def parse_args():
     parser.add_argument('--timeout', type=int, default=config.get('timeout_seconds', 30), help='Timeout in seconds')
     
     metadata_default = config.get('metadata', {}).get('enabled', True)
-    parser.add_argument('--no-online-lookup', action='store_false', default=metadata_default, dest='online_lookup', help='Disable online metadata lookup and enrichment')
+    parser.add_argument('--no-metadata', action='store_false', default=metadata_default, dest='metadata_lookup', help='Disable online metadata lookup and enrichment')
     
     return parser.parse_args()
 
@@ -271,7 +271,7 @@ def main():
     args = parse_args()
     
     config = load_config()
-    if not args.online_lookup:
+    if not args.metadata_lookup:
         if 'metadata' not in config:
             config['metadata'] = {}
         config['metadata']['enabled'] = False

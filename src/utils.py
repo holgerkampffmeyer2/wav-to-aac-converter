@@ -99,7 +99,6 @@ def load_config() -> Dict[str, Any]:
     from pathlib import Path
     config_path = Path(__file__).parent / 'config.json'
     default_config: Dict[str, Any] = {
-        "ascii_filename": False,
         "output_format": "mp3",
         "max_parallel_processes": 5,
         "loudnorm": True,

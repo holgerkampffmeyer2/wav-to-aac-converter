@@ -101,7 +101,7 @@ python3 convert.py --m4a *.wav            # Batch to M4A
 python3 convert.py --format m4a file.wav
 
 # Metadata options
-python3 convert.py --no-online-lookup file.wav    # Disable online metadata lookup and enrichment (default: enabled)
+python3 convert.py --no-metadata file.wav    # Disable online metadata lookup and enrichment (default: enabled)
 ```
 
 ## Unicode Filename Handling

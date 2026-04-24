@@ -216,8 +216,9 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
             title = raw_title
             metadata['title'] = title
     
-    if metadata_enabled and not (artist and title):
-        online_artist, online_title = lookup_online_metadata(f"{artist} {title}")
+    search_term = f"{artist} {title}".strip()
+    if metadata_enabled and search_term and not (artist and title):
+        online_artist, online_title = lookup_online_metadata(search_term)
         if online_artist and online_title:
             artist = online_artist
             title = online_title

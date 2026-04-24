@@ -71,7 +71,6 @@ def process_cover(cover_path: str, output_path: str) -> bool:
 
 def embed_cover(input_path: str, cover_path: str, final_path: str, fmt: str) -> bool:
     """Embed cover art into audio file."""
-    logger.info(f"embed_cover called: input={input_path}, cover={cover_path}, final={final_path}, fmt={fmt}")
     if fmt == 'mp3':
         cmd = f'ffmpeg -y -i "{input_path}" -i "{cover_path}" -map 0:a -map 1:v -c copy -id3v2_version 3 -metadata:s:v title="Album cover" -metadata:s:v comment="Cover (front)" "{final_path}" 2>/dev/null'
     elif fmt == 'm4a':
@@ -79,13 +78,7 @@ def embed_cover(input_path: str, cover_path: str, final_path: str, fmt: str) -> 
     else:
         return False
     
-    logger.info(f"Running embed command: {cmd[:100]}...")
-    result = run_cmd(cmd)
-    logger.info(f"run_cmd result: {result}, type: {type(result)}")
-    
-    success, stdout, stderr = result
-    logger.info(f"success: {success}, stdout: {stdout[:100] if stdout else 'empty'}, stderr: {stderr[:100] if stderr else 'empty'}")
-    
+    success, stdout, stderr = run_cmd(cmd)
     return success
 
 
