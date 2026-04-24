@@ -506,14 +506,11 @@ class TestConfigFeatures(unittest.TestCase):
                     "retry_attempts": 3,
                     "timeout_seconds": 30,
                     "fuzzy_threshold": 0.8,
-                    "online_lookup": {
+                    "metadata": {
                         "enabled": True,
                         "sources": ["itunes", "bandcamp", "musicbrainz", "deezer"],
-                        "fallback_to_filename": True
-                    },
-                    "enrich_metadata": {
-                        "enabled": True,
-                        "write_tags": ["label", "genre", "album", "year", "track_number"],
+                        "fallback_to_filename": True,
+                        "enrich_tags": ["label", "genre", "album", "year", "track_number"],
                         "label_source_tag": "label"
                     }
                 }
@@ -1420,7 +1417,7 @@ class TestEnrichAndSearchCover(unittest.TestCase):
     def test_enrich_and_search_cover_with_metadata(self):
         """Test enrich_and_search_cover with existing metadata."""
         wav_path = os.path.join(self.test_dir, "test.wav")
-        config = {'online_lookup': {'enabled': False}, 'enrich_metadata': {'enabled': False}}
+        config = {'metadata': {'enabled': False}}
         
         with patch('src.metadata.extract_metadata', return_value={'artist': 'Test Artist', 'title': 'Test Title'}), \
              patch('src.metadata.enrich_file_metadata', return_value={'genre': 'Electronic'}), \
@@ -1437,7 +1434,7 @@ class TestEnrichAndSearchCover(unittest.TestCase):
     def test_enrich_and_search_cover_fallback_to_filename(self):
         """Test fallback to filename when no embedded metadata."""
         wav_path = os.path.join(self.test_dir, "test.wav")
-        config = {'online_lookup': {'enabled': False, 'fallback_to_filename': True}, 'enrich_metadata': {'enabled': False}}
+        config = {'metadata': {'enabled': False, 'fallback_to_filename': True}}
         
         with patch('src.metadata.extract_metadata', return_value={}), \
              patch('src.metadata.extract_metadata_from_filename', return_value=('Artist From File', 'Title From File')), \

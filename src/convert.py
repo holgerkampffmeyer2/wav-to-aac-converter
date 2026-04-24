@@ -258,8 +258,8 @@ def parse_args():
     parser.add_argument('--retry-attempts', type=int, default=config.get('retry_attempts', 3), help='Retry attempts')
     parser.add_argument('--timeout', type=int, default=config.get('timeout_seconds', 30), help='Timeout in seconds')
     
-    online_lookup_default = config.get('online_lookup', {}).get('enabled', True)
-    parser.add_argument('--no-online-lookup', action='store_false', default=online_lookup_default, dest='online_lookup', help='Disable online metadata lookup and enrichment')
+    metadata_default = config.get('metadata', {}).get('enabled', True)
+    parser.add_argument('--no-online-lookup', action='store_false', default=metadata_default, dest='online_lookup', help='Disable online metadata lookup and enrichment')
     
     return parser.parse_args()
 
@@ -272,12 +272,9 @@ def main():
     
     config = load_config()
     if not args.online_lookup:
-        if 'online_lookup' not in config:
-            config['online_lookup'] = {}
-        config['online_lookup']['enabled'] = False
-        if 'enrich_metadata' not in config:
-            config['enrich_metadata'] = {}
-        config['enrich_metadata']['enabled'] = False
+        if 'metadata' not in config:
+            config['metadata'] = {}
+        config['metadata']['enabled'] = False
     
     wav_files = [f for f in args.files if f.endswith('.wav') or f.endswith('.WAV')]
     

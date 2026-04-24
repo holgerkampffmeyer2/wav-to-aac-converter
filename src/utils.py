@@ -107,14 +107,11 @@ def load_config() -> Dict[str, Any]:
         "retry_attempts": 3,
         "timeout_seconds": 30,
         "fuzzy_threshold": 0.8,
-        "online_lookup": {
+        "metadata": {
             "enabled": True,
             "sources": ["itunes", "bandcamp", "musicbrainz", "deezer"],
-            "fallback_to_filename": True
-        },
-        "enrich_metadata": {
-            "enabled": True,
-            "write_tags": ["label", "genre", "album", "year", "track_number"],
+            "fallback_to_filename": True,
+            "enrich_tags": ["label", "genre", "album", "year", "track_number"],
             "label_source_tag": "label"
         }
     }

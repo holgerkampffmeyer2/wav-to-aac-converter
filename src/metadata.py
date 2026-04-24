@@ -841,10 +841,10 @@ def enrich_file_metadata(wav_path: str, artist: str, title: str, config: Dict[st
         Dict with enriched metadata fields
     """
     enriched = {}
-    write_tags = config.get('enrich_metadata', {}).get('write_tags', [])
-    label_source_tag = config.get('enrich_metadata', {}).get('label_source_tag', 'label')
+    enrich_tags = config.get('metadata', {}).get('enrich_tags', [])
+    label_source_tag = config.get('metadata', {}).get('label_source_tag', 'label')
     
-    if not write_tags:
+    if not enrich_tags:
         return enriched
     
     if current_metadata is None:
@@ -853,7 +853,7 @@ def enrich_file_metadata(wav_path: str, artist: str, title: str, config: Dict[st
     label_tag = label_source_tag if label_source_tag else 'label'
     tags_to_write = {}
     
-    if 'label' in write_tags:
+    if 'label' in enrich_tags:
         label = current_metadata.get('label') or current_metadata.get('Label') or current_metadata.get('TPUB')
         if not label:
             label = lookup_label_online(artist, title)
@@ -861,7 +861,7 @@ def enrich_file_metadata(wav_path: str, artist: str, title: str, config: Dict[st
                 tags_to_write[label_tag] = label
                 enriched['label'] = label
     
-    if 'genre' in write_tags:
+    if 'genre' in enrich_tags:
         genre = current_metadata.get('genre')
         if not genre:
             genre = get_genre_online(artist, title)
@@ -869,7 +869,7 @@ def enrich_file_metadata(wav_path: str, artist: str, title: str, config: Dict[st
                 tags_to_write['genre'] = genre
                 enriched['genre'] = genre
     
-    if 'album' in write_tags or 'year' in write_tags or 'track_number' in write_tags:
+    if 'album' in enrich_tags or 'year' in enrich_tags or 'track_number' in enrich_tags:
         album = current_metadata.get('album')
         year = current_metadata.get('date')
         track_number = current_metadata.get('track_number')
@@ -877,15 +877,15 @@ def enrich_file_metadata(wav_path: str, artist: str, title: str, config: Dict[st
         if not album or not year or not track_number:
             additional = get_additional_metadata_online(artist, title)
             
-            if 'album' in write_tags and not album and additional.get('album'):
+            if 'album' in enrich_tags and not album and additional.get('album'):
                 tags_to_write['album'] = additional['album']
                 enriched['album'] = additional['album']
             
-            if 'year' in write_tags and not year and additional.get('year'):
+            if 'year' in enrich_tags and not year and additional.get('year'):
                 tags_to_write['date'] = additional['year']
                 enriched['year'] = additional['year']
             
-            if 'track_number' in write_tags and not track_number and additional.get('track_number'):
+            if 'track_number' in enrich_tags and not track_number and additional.get('track_number'):
                 tags_to_write['track'] = str(additional['track_number'])
                 enriched['track_number'] = additional['track_number']
     

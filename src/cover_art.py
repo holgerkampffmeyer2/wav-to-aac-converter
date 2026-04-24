@@ -193,9 +193,8 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
     from .audio_processing import find_local_cover, run_cmd as audio_run_cmd
     from pathlib import Path
     
-    online_lookup_enabled = config.get('online_lookup', {}).get('enabled', True)
-    enrich_enabled = config.get('enrich_metadata', {}).get('enabled', True)
-    fallback_to_filename = config.get('online_lookup', {}).get('fallback_to_filename', True)
+    metadata_enabled = config.get('metadata', {}).get('enabled', True)
+    fallback_to_filename = config.get('metadata', {}).get('fallback_to_filename', True)
     
     metadata = {}
     cover_source = None
@@ -217,7 +216,7 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
             title = raw_title
             metadata['title'] = title
     
-    if online_lookup_enabled and not (artist and title):
+    if metadata_enabled and not (artist and title):
         online_artist, online_title = lookup_online_metadata(f"{artist} {title}")
         if online_artist and online_title:
             artist = online_artist
@@ -237,7 +236,7 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
                 metadata['title'] = title
             logger.info(f"  Metadata from filename: {artist} - {title}")
     
-    if enrich_enabled and artist and title:
+    if metadata_enabled and artist and title:
         enriched = enrich_file_metadata(wav_path, artist, title, config, current_metadata)
         if enriched:
             metadata.update(enriched)
