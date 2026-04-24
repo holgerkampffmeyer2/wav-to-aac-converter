@@ -258,12 +258,8 @@ def parse_args():
     parser.add_argument('--retry-attempts', type=int, default=config.get('retry_attempts', 3), help='Retry attempts')
     parser.add_argument('--timeout', type=int, default=config.get('timeout_seconds', 30), help='Timeout in seconds')
     
-    enrich_default = config.get('enrich_metadata', {}).get('enabled', True)
     online_lookup_default = config.get('online_lookup', {}).get('enabled', True)
-    
-    parser.add_argument('--enrich-metadata', '-e', action='store_true', default=enrich_default, dest='enrich_metadata', help='Enable metadata enrichment (write tags to file)')
-    parser.add_argument('--no-enrich-metadata', action='store_false', default=enrich_default, dest='enrich_metadata', help='Disable metadata enrichment')
-    parser.add_argument('--no-online-lookup', action='store_false', default=online_lookup_default, dest='online_lookup', help='Disable online metadata lookup')
+    parser.add_argument('--no-online-lookup', action='store_false', default=online_lookup_default, dest='online_lookup', help='Disable online metadata lookup and enrichment')
     
     return parser.parse_args()
 
@@ -279,7 +275,6 @@ def main():
         if 'online_lookup' not in config:
             config['online_lookup'] = {}
         config['online_lookup']['enabled'] = False
-    if not args.enrich_metadata:
         if 'enrich_metadata' not in config:
             config['enrich_metadata'] = {}
         config['enrich_metadata']['enabled'] = False
