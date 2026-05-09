@@ -260,6 +260,7 @@ def parse_args():
     
     metadata_default = config.get('metadata', {}).get('enabled', True)
     parser.add_argument('--no-metadata', action='store_false', default=metadata_default, dest='metadata_lookup', help='Disable online metadata lookup and enrichment')
+    parser.add_argument('--offline', action='store_true', default=config.get('metadata', {}).get('offline', False), help='Offline mode: no online lookups, local cover only')
     
     return parser.parse_args()
 
@@ -271,10 +272,13 @@ def main():
     args = parse_args()
     
     config = load_config()
+    if 'metadata' not in config:
+        config['metadata'] = {}
     if not args.metadata_lookup:
-        if 'metadata' not in config:
-            config['metadata'] = {}
         config['metadata']['enabled'] = False
+    if args.offline:
+        config['metadata']['enabled'] = False
+        config['metadata']['offline'] = True
     
     wav_files = [f for f in args.files if f.endswith('.wav') or f.endswith('.WAV')]
     

@@ -194,6 +194,7 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
     from pathlib import Path
     
     metadata_enabled = config.get('metadata', {}).get('enabled', True)
+    offline = config.get('metadata', {}).get('offline', False)
     fallback_to_filename = config.get('metadata', {}).get('fallback_to_filename', True)
     
     metadata = {}
@@ -242,12 +243,12 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
             metadata.update(enriched)
     
     cover_path_for_local = original_wav_path if original_wav_path else wav_path
-    cover_source = _find_cover(wav_path, artist, title, cover_path_for_local)
+    cover_source = _find_cover(wav_path, artist, title, cover_path_for_local, offline)
     
     return metadata, cover_source
 
 
-def _find_cover(wav_path: str, artist: str, title: str, original_wav_path: str = None) -> Optional[str]:
+def _find_cover(wav_path: str, artist: str, title: str, original_wav_path: str = None, offline: bool = False) -> Optional[str]:
     """Find cover with priority: embedded in WAV → local → online.
     
     Args:
@@ -255,6 +256,7 @@ def _find_cover(wav_path: str, artist: str, title: str, original_wav_path: str =
         artist: Artist name
         title: Track title
         original_wav_path: Original WAV path for local cover search (if different from wav_path)
+        offline: If True, skip online cover search
     
     Returns:
         - Local file path if found
@@ -286,7 +288,7 @@ def _find_cover(wav_path: str, artist: str, title: str, original_wav_path: str =
         logger.info(f"  Cover: Found local file")
         return local_cover
     
-    if artist and title:
+    if not offline and artist and title:
         search_title = clean_title_for_search(title) if clean_title_for_search(title) else title
         
         cover_url = search_deezer_cover(artist, search_title)

@@ -507,6 +507,7 @@ class TestConfigFeatures(unittest.TestCase):
                     "fuzzy_threshold": 0.8,
                     "metadata": {
                         "enabled": True,
+                        "offline": False,
                         "sources": ["itunes", "bandcamp", "musicbrainz", "deezer"],
                         "fallback_to_filename": True,
                         "enrich_tags": ["label", "genre", "album", "year", "track_number"],
@@ -609,6 +610,21 @@ class TestConfigFeatures(unittest.TestCase):
                 self.assertFalse(args.embed_cover)  # Command line override
                 self.assertEqual(args.retry_attempts, 7)  # Command line override
                 self.assertEqual(args.timeout, 120)  # Command line override
+
+    def test_parse_args_offline_flag(self):
+        """Test that --offline flag sets offline mode."""
+        from src.convert import parse_args, load_config
+        from unittest.mock import patch
+        import sys
+        
+        test_config = load_config()
+        
+        with patch('src.convert.load_config', return_value=test_config):
+            # Test --offline flag
+            test_args = ['--offline', 'dummy.wav']
+            with patch('sys.argv', ['convert.py'] + test_args):
+                args = parse_args()
+                self.assertTrue(args.offline)
 
     def test_convert_batch_ascii_filename_param(self):
         """Test that convert_batch works without ascii_filename parameter (removed)."""
@@ -1410,6 +1426,23 @@ class TestEmbeddedCoverExtraction(unittest.TestCase):
             
             self.assertIsNone(cover_path)
 
+    def test_find_cover_offline_skips_online_search(self):
+        """Test offline mode skips online cover search."""
+        wav_path = os.path.join(self.test_dir, "test.wav")
+        
+        with open(wav_path, 'wb') as f:
+            f.write(b'RIFF' + b'\x00' * 100)
+        
+        with patch('src.audio_processing.run_cmd') as mock_run_cmd:
+            mock_run_cmd.return_value = (False, "", "")
+            
+            with patch('src.audio_processing.find_local_cover', return_value=None) as mock_local:
+                from src.cover_art import _find_cover
+                cover_path = _find_cover(wav_path, "Artist", "Title", wav_path, offline=True)
+            
+            self.assertIsNone(cover_path)
+            mock_local.assert_called_once()
+
 
 class TestEnrichAndSearchCover(unittest.TestCase):
     """Tests for combined enrich and cover search function."""
@@ -1452,6 +1485,26 @@ class TestEnrichAndSearchCover(unittest.TestCase):
             
             self.assertEqual(metadata['artist'], 'Artist From File')
             self.assertEqual(metadata['title'], 'Title From File')
+
+    def test_enrich_and_search_cover_offline_mode(self):
+        """Test offline mode skips online enrichment and online cover search."""
+        wav_path = os.path.join(self.test_dir, "test.wav")
+        config = {'metadata': {'enabled': False, 'offline': True, 'fallback_to_filename': True}}
+        
+        with patch('src.metadata.extract_metadata', return_value={}), \
+             patch('src.metadata.extract_metadata_from_filename', return_value=('Local Artist', 'Local Title')), \
+             patch('src.metadata.enrich_file_metadata', return_value={'genre': 'Electronic'}) as mock_enrich, \
+             patch('src.cover_art._find_cover', return_value=None) as mock_find_cover:
+            from src.cover_art import enrich_and_search_cover
+            
+            metadata, cover = enrich_and_search_cover(wav_path, "Local Artist - Local Title.wav", config, wav_path)
+            
+            self.assertEqual(metadata['artist'], 'Local Artist')
+            self.assertEqual(metadata['title'], 'Local Title')
+            mock_enrich.assert_not_called()
+            mock_find_cover.assert_called_once()
+            call_args = mock_find_cover.call_args[0]
+            self.assertTrue(call_args[4])  # offline is the 5th positional arg
 
 
 class TestURLValidation(unittest.TestCase):

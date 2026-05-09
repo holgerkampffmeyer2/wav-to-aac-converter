@@ -41,6 +41,7 @@ The converter can be configured using a `config.json` file in the same directory
   "fuzzy_threshold": 0.8,
   "metadata": {
     "enabled": true,
+    "offline": false,
     "sources": ["itunes", "bandcamp", "musicbrainz", "deezer"],
     "fallback_to_filename": true,
     "enrich_tags": ["label", "genre", "album", "year", "track_number"],
@@ -58,6 +59,7 @@ The converter can be configured using a `config.json` file in the same directory
 - `timeout_seconds`: Timeout in seconds for operations (default: 30)
 - `fuzzy_threshold`: Similarity threshold for fuzzy matching (0.0-1.0, default: 0.8)
 - `metadata.enabled`: Enable online metadata lookup and enrichment (default: true)
+- `metadata.offline`: Skip all online lookups and cover search (default: false)
 - `metadata.sources`: Online sources to use (default: itunes, bandcamp, musicbrainz, deezer)
 - `metadata.fallback_to_filename`: Fallback to filename parsing if no metadata found (default: true)
 - `metadata.enrich_tags`: Tags to write when enriching (default: label, genre, album, year, track_number)
@@ -103,6 +105,7 @@ python3 convert.py --format m4a file.wav
 
 # Metadata options
 python3 convert.py --no-metadata file.wav    # Disable online metadata lookup and enrichment (default: enabled)
+python3 convert.py --offline file.wav        # Offline mode: no online lookups, local cover only
 ```
 
 ## Unicode Filename Handling
@@ -157,7 +160,7 @@ sudo apt install ffmpeg python3
 
 1. **Source file**: Extract embedded cover from WAV
 2. **Local folder**: Look for `cover.png`, `cover.jpg`, or matching image files
-3. **Online search**: Deezer → MusicBrainz → Bandcamp
+3. **Online search**: Deezer → MusicBrainz → Bandcamp (skipped in `--offline` mode)
 
 ## Metadata Strategy
 

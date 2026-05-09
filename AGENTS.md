@@ -41,6 +41,10 @@ python3 convert.py *.wav                   # Batch (auto-parallel for 4+ files)
 # M4A output
 python3 convert.py --m4a <file.wav>        # Single file to M4A
 python3 convert.py --m4a *.wav             # Batch to M4A
+
+# Offline mode (no online lookups, local cover only)
+python3 convert.py --offline <file.wav>    # Single file offline
+python3 convert.py --offline *.wav         # Batch offline
 ```
 
 ## Output Format Selection
@@ -49,6 +53,7 @@ python3 convert.py --m4a *.wav             # Batch to M4A
 |------|--------|-------|
 | (default) | MP3 | libmp3lame, 320kbps |
 | `--m4a` | M4A | AAC, 320kbps |
+| `--offline` | Current | No online lookups, local cover only |
 
 ## Workflow Steps
 
@@ -75,7 +80,7 @@ When `metadata.enabled` is true (default), missing tags are written to the WAV f
 ### Cover Artwork Strategy
 1. **Source file**: Extract embedded cover from WAV
 2. **Local folder**: Look for `cover.png`, `cover.jpg`, or matching image files
-3. **Web search**: Deezer → MusicBrainz → Bandcamp
+3. **Web search**: Deezer → MusicBrainz → Bandcamp (skipped in `--offline` mode)
 
 Note: Cover search stops at first successful match (early exit).
 

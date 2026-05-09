@@ -108,6 +108,7 @@ def load_config() -> Dict[str, Any]:
         "fuzzy_threshold": 0.8,
         "metadata": {
             "enabled": True,
+            "offline": False,
             "sources": ["itunes", "bandcamp", "musicbrainz", "deezer"],
             "fallback_to_filename": True,
             "enrich_tags": ["label", "genre", "album", "year", "track_number"],
