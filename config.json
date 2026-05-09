@@ -1,0 +1,17 @@
+{
+  "output_format": "mp3",
+  "max_parallel_processes": 5,
+  "loudnorm": true,
+  "embed_cover": true,
+  "retry_attempts": 3,
+  "timeout_seconds": 30,
+  "fuzzy_threshold": 0.8,
+  "metadata": {
+    "enabled": true,
+    "offline": false,
+    "sources": ["itunes", "bandcamp", "musicbrainz", "deezer"],
+    "fallback_to_filename": true,
+    "enrich_tags": ["label", "genre", "album", "year", "track_number"],
+    "label_source_tag": "label"
+  }
+}

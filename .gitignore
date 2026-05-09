@@ -28,6 +28,7 @@ ffmpeg*.log
 
 # Analysis outputs
 *.json
+!config.json
 *_analysis.txt
 
 # Working directories
