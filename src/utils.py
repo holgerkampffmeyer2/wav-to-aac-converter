@@ -10,6 +10,24 @@ from functools import wraps
 
 logger = logging.getLogger(__name__)
 
+# === Environment ===
+def _load_env() -> dict:
+    """Load environment variables from .env file in project root."""
+    env_path = Path(__file__).parent.parent / '.env'
+    env_vars = {}
+    if env_path.exists():
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#'):
+                    if '=' in line:
+                        key, _, value = line.partition('=')
+                        env_vars[key.strip()] = value.strip()
+    return env_vars
+
+_env = _load_env()
+SOUNDCLOUD_CLIENT_ID: str = _env.get('SOUNDCLOUD_CLIENT_ID', '')
+
 # === Regex Patterns ===
 OG_IMAGE_RE = re.compile(r'"og:image"\s+content="([^"]+)"')
 BANDCAMP_URL_RE = re.compile(r'https?://[^\s"\'<>]*\.bandcamp\.com/(?:track|album)/[^\s"\'<>]*')
@@ -97,7 +115,7 @@ def retry(max_attempts: int = RETRY_ATTEMPTS, delay: int = RETRY_DELAY, backoff:
 def load_config() -> Dict[str, Any]:
     """Load configuration from config.json file."""
     from pathlib import Path
-    config_path = Path(__file__).parent / 'config.json'
+    config_path = Path(__file__).parent.parent / 'config.json'
     default_config: Dict[str, Any] = {
         "output_format": "mp3",
         "max_parallel_processes": 5,
@@ -106,10 +124,11 @@ def load_config() -> Dict[str, Any]:
         "retry_attempts": 3,
         "timeout_seconds": 30,
         "fuzzy_threshold": 0.8,
+        "soundcloud_confidence_threshold": 0.6,
         "metadata": {
             "enabled": True,
             "offline": False,
-            "sources": ["itunes", "bandcamp", "musicbrainz", "deezer"],
+            "sources": ["soundcloud", "itunes", "deezer", "bandcamp", "musicbrainz"],
             "fallback_to_filename": True,
             "enrich_tags": ["label", "genre", "album", "year", "track_number"],
             "label_source_tag": "label"
@@ -189,6 +208,97 @@ def clean_title_for_search(title: str) -> str:
     return strip_brackets(title)
 
 
+def calculate_match_confidence(expected_artist: str, expected_title: str, found_track_title: str) -> float:
+    """Calculate confidence (0.0–1.0) that found_track_title matches expected artist/title.
+    
+    Uses word-level containment for multi-word names (e.g. "Emmanuel Callejas Erick Cz"
+    appears in "Emmanuel Callejas, Erick Cz - The Rub 212 [SLFREEDL062]") and falls
+    back to SequenceMatcher fuzzy ratio for single-word or partial matches.
+    """
+    from difflib import SequenceMatcher
+
+    if not found_track_title:
+        return 0.0
+
+    found_lower = found_track_title.lower()
+    expected_artist = (expected_artist or '').strip()
+    expected_title = (expected_title or '').strip()
+
+    def _score(expected: str) -> float:
+        if not expected:
+            return 1.0
+        expected_lower = expected.lower()
+        words = expected_lower.split()
+        if len(words) >= 2:
+            matches = sum(1 for w in words if w in found_lower)
+            word_score = matches / len(words)
+        else:
+            word_score = 1.0 if expected_lower in found_lower else 0.0
+        fuzzy = SequenceMatcher(None, expected_lower, found_lower).ratio()
+        return max(word_score, fuzzy)
+
+    scores = [_score(expected_artist), _score(expected_title)]
+    return (scores[0] + scores[1]) / 2
+
+
+def search_soundcloud_api(query: str, limit: int = 5) -> list:
+    """Search SoundCloud via API v2. Returns list of track result dicts."""
+    import json
+    from urllib.parse import quote
+
+    if not SOUNDCLOUD_CLIENT_ID:
+        logger.warning("No SOUNDCLOUD_CLIENT_ID in .env — SoundCloud search disabled")
+        return []
+
+    url = (f"https://api-v2.soundcloud.com/search/tracks"
+           f"?q={quote(query)}&client_id={SOUNDCLOUD_CLIENT_ID}&limit={limit}")
+    content = fetch_url(url, timeout=SEARCH_TIMEOUT)
+    if not content:
+        return []
+
+    try:
+        data = json.loads(content)
+        return data.get('collection', [])
+    except json.JSONDecodeError:
+        return []
+
+
+def try_soundcloud_api_result(track: dict, expected_artist: str, expected_title: str,
+                              config: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """Validate a SoundCloud API track result with confidence scoring.
+
+    Returns enriched dict with title, artist, thumbnail, url, confidence.
+    """
+    if config is None:
+        config = load_config()
+
+    api_title = track.get('title', '')
+    uploader = track.get('user', {}).get('username', '') if track.get('user') else ''
+    artwork = track.get('artwork_url', '')
+    permalink = track.get('permalink_url', '')
+
+    if not api_title:
+        return None
+
+    confidence = calculate_match_confidence(expected_artist, expected_title, api_title)
+    threshold = config.get('soundcloud_confidence_threshold', 0.6)
+
+    if confidence >= threshold:
+        # Upgrade artwork to t500x500 for higher resolution
+        if artwork and '-large.jpg' in artwork:
+            artwork = artwork.replace('-large.jpg', '-t500x500.jpg')
+        return {
+            'title': api_title,
+            'artist': uploader,
+            'thumbnail': artwork,
+            'url': permalink,
+            'confidence': confidence,
+        }
+
+    logger.debug(f"  SoundCloud API confidence {confidence:.2f} < {threshold}")
+    return None
+
+
 def fetch_url(url: str, timeout: int = DEFAULT_TIMEOUT, headers: Optional[Dict[str, str]] = None, method: str = 'GET', data: Optional[Dict[str, str]] = None) -> str:
     """Fetch URL content with configurable options."""
     from typing import Dict
@@ -230,7 +340,7 @@ def fetch_url(url: str, timeout: int = DEFAULT_TIMEOUT, headers: Optional[Dict[s
             form_data.extend(['-d', f'{key}={escaped_value}'])
         curl_cmd.extend(form_data)
     
-    curl_cmd.append(url)
+    curl_cmd.append(f'"{url}"')
     
     success, stdout, _ = run_cmd(' '.join(curl_cmd), timeout=timeout + 5)
     return stdout if success else ""

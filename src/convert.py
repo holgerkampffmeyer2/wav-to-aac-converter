@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WAV to MP3/M4A converter with loudness normalization, metadata, and cover art."""
+"""WAV/AIFF to MP3/M4A converter with loudness normalization, metadata, and cover art."""
 
 import argparse
 import logging
@@ -249,7 +249,7 @@ def parse_args():
     config = load_config()
     
     parser = argparse.ArgumentParser(description='Convert WAV to MP3/M4A with metadata and cover art')
-    parser.add_argument('files', nargs='+', help='WAV file(s) to convert')
+    parser.add_argument('files', nargs='+', help='WAV/AIFF file(s) to convert')
     parser.add_argument('--format', default=config.get('output_format', 'mp3'), choices=['mp3', 'm4a'], help='Output format')
     parser.add_argument('--m4a', action='store_true', help='Output to M4A format')
     parser.add_argument('--max-workers', type=int, default=config.get('max_parallel_processes', 5), help='Max parallel processes')
@@ -280,10 +280,11 @@ def main():
         config['metadata']['enabled'] = False
         config['metadata']['offline'] = True
     
-    wav_files = [f for f in args.files if f.endswith('.wav') or f.endswith('.WAV')]
+    audio_extensions = ('.wav', '.WAV', '.aif', '.aiff', '.AIF', '.AIFF')
+    audio_files = [f for f in args.files if f.lower().endswith(audio_extensions)]
     
-    if not wav_files:
-        logger.error("Error: No WAV files found")
+    if not audio_files:
+        logger.error("Error: No WAV/AIFF files found")
         sys.exit(1)
     
     if args.m4a:
@@ -295,11 +296,11 @@ def main():
     
     logger.info(f"Output format: {fmt.upper()}")
     
-    if len(wav_files) == 1:
-        success, output = convert_file(wav_files[0], fmt, embed_cover, config)
+    if len(audio_files) == 1:
+        success, output = convert_file(audio_files[0], fmt, embed_cover, config)
         sys.exit(0 if success else 1)
     
-    results = convert_batch(wav_files, fmt, parallel=(len(wav_files) >= 4), max_workers=args.max_workers, embed_cover=embed_cover, config=config)
+    results = convert_batch(audio_files, fmt, parallel=(len(audio_files) >= 4), max_workers=args.max_workers, embed_cover=embed_cover, config=config)
     
     success_count = sum(1 for _, s, _ in results if s)
     logger.info(f"\nBatch complete: {success_count}/{len(results)} succeeded")

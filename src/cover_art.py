@@ -20,7 +20,9 @@ from src.utils import (
     retry,
     fetch_url,
     clean_title_for_search,
-    load_config
+    load_config,
+    search_soundcloud_api,
+    try_soundcloud_api_result,
 )
 
 logger = logging.getLogger(__name__)
@@ -123,6 +125,26 @@ def search_bandcamp_cover(artist: str, title: str) -> Optional[str]:
         img_match = OG_IMAGE_RE.search(page_content)
         if img_match:
             return img_match.group(1)
+    return None
+
+
+def search_soundcloud_cover(artist: str, title: str) -> Optional[str]:
+    """Search SoundCloud for cover art via API v2 with confidence scoring."""
+    if not artist and not title:
+        return None
+
+    query = f"{artist} {title}"
+    results = search_soundcloud_api(query)
+    if not results:
+        return None
+
+    config = load_config()
+    for track in results:
+        result = try_soundcloud_api_result(track, artist, title, config)
+        if result:
+            logger.info(f"  SoundCloud cover found (confidence {result['confidence']:.2f})")
+            return result['thumbnail']
+
     return None
 
 
@@ -243,20 +265,38 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
             metadata.update(enriched)
     
     cover_path_for_local = original_wav_path if original_wav_path else wav_path
-    cover_source = _find_cover(wav_path, artist, title, cover_path_for_local, offline)
+    cover_source = _find_cover(wav_path, artist, title, cover_path_for_local, offline, config)
     
     return metadata, cover_source
 
 
-def _find_cover(wav_path: str, artist: str, title: str, original_wav_path: str = None, offline: bool = False) -> Optional[str]:
-    """Find cover with priority: embedded in WAV → local → online.
+COVER_SOURCE_DISPATCH = {
+    'deezer': ('Deezer', lambda a, t, c: search_deezer_cover(a, t)),
+    'soundcloud': ('SoundCloud', lambda a, t, c: search_soundcloud_cover(a, t)),
+    'musicbrainz': ('MusicBrainz', lambda a, t, c: search_musicbrainz_cover(a, t)),
+    'bandcamp': ('Bandcamp', lambda a, t, c: search_bandcamp_cover(a, t)),
+}
+
+
+def _get_cover_sources(config: Dict[str, Any]) -> list:
+    """Get ordered list of cover source names from config, filtered to valid sources only."""
+    all_sources = config.get('metadata', {}).get('sources', [
+        'deezer', 'soundcloud', 'musicbrainz', 'bandcamp'
+    ])
+    return [s for s in all_sources if s.lower() in COVER_SOURCE_DISPATCH]
+
+
+def _find_cover(wav_path: str, artist: str, title: str, original_wav_path: str = None,
+                offline: bool = False, config: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Find cover with priority: embedded → local → online (configurable sources).
     
     Args:
-        wav_path: Path to the WAV file (may be temp copy)
+        wav_path: Path to the audio file (may be temp copy)
         artist: Artist name
         title: Track title
-        original_wav_path: Original WAV path for local cover search (if different from wav_path)
+        original_wav_path: Original path for local cover search
         offline: If True, skip online cover search
+        config: Configuration dict (for source ordering)
     
     Returns:
         - Local file path if found
@@ -265,6 +305,10 @@ def _find_cover(wav_path: str, artist: str, title: str, original_wav_path: str =
     """
     from .audio_processing import find_local_cover, run_cmd as audio_run_cmd, download_cover
     from pathlib import Path
+    
+    if config is None:
+        from .utils import load_config
+        config = load_config()
     
     path_for_local_search = original_wav_path if original_wav_path else wav_path
     
@@ -290,21 +334,21 @@ def _find_cover(wav_path: str, artist: str, title: str, original_wav_path: str =
     
     if not offline and artist and title:
         search_title = clean_title_for_search(title) if clean_title_for_search(title) else title
+        sources = _get_cover_sources(config)
         
-        cover_url = search_deezer_cover(artist, search_title)
-        if cover_url:
-            logger.info(f"  Cover: Found on Deezer")
-            return cover_url
-        
-        cover_url = search_musicbrainz_cover(artist, search_title)
-        if cover_url:
-            logger.info(f"  Cover: Found on MusicBrainz")
-            return cover_url
-        
-        cover_url = search_bandcamp_cover(artist, search_title)
-        if cover_url:
-            logger.info(f"  Cover: Found on Bandcamp")
-            return cover_url
+        for source_name in sources:
+            entry = COVER_SOURCE_DISPATCH.get(source_name.lower())
+            if not entry:
+                logger.warning(f"  Unknown cover source: {source_name}")
+                continue
+            label, func = entry
+            try:
+                cover_url = func(artist, search_title, config)
+                if cover_url:
+                    logger.info(f"  Cover: Found on {label}")
+                    return cover_url
+            except Exception as e:
+                logger.warning(f"  {label} search failed: {e}")
     
     logger.debug(f"  Cover: Not found")
     return None

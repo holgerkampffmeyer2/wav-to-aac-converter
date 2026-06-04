@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/github/license/holgerkampffmeyer2/wav-to-aac-converter)](https://github.com/holgerkampffmeyer2/wav-to-aac-converter)
 [![Tests](https://github.com/holgerkampffmeyer2/wav-to-aac-converter/actions/workflows/test.yml/badge.svg)](https://github.com/holgerkampffmeyer2/wav-to-aac-converter/actions/workflows/test.yml)
 
-AI-agent driven WAV to MP3/M4A conversion with loudness normalization, metadata extraction, and cover art embedding.
+AI-agent driven WAV/AIFF to MP3/M4A conversion with loudness normalization, metadata extraction, and cover art embedding.
 
 ## How It Works
 
@@ -20,8 +20,8 @@ The agent handles:
 - Prerequisites check (ffmpeg, python3)
 - File discovery and batch processing decisions
 - Loudness analysis and gain calculation
-- Metadata extraction from files, online lookup (iTunes → Deezer → Bandcamp → MusicBrainz), or filename parsing
-- Cover art search: embedded → local folder → Deezer → MusicBrainz → Bandcamp
+- Metadata extraction from files, online lookup (configurable sources), or filename parsing
+- Cover art search: embedded → local folder → configurable online sources
 - Error recovery and retries
 - Verification of output quality
 
@@ -42,7 +42,7 @@ The converter can be configured using a `config.json` file in the same directory
   "metadata": {
     "enabled": true,
     "offline": false,
-    "sources": ["itunes", "bandcamp", "musicbrainz", "deezer"],
+    "sources": ["soundcloud", "itunes", "deezer", "bandcamp", "musicbrainz"],
     "fallback_to_filename": true,
     "enrich_tags": ["label", "genre", "album", "year", "track_number"],
     "label_source_tag": "label"
@@ -60,10 +60,11 @@ The converter can be configured using a `config.json` file in the same directory
 - `fuzzy_threshold`: Similarity threshold for fuzzy matching (0.0-1.0, default: 0.8)
 - `metadata.enabled`: Enable online metadata lookup and enrichment (default: true)
 - `metadata.offline`: Skip all online lookups and cover search (default: false)
-- `metadata.sources`: Online sources to use (default: itunes, bandcamp, musicbrainz, deezer)
+- `metadata.sources`: Online sources (order = priority). Available: itunes, deezer, bandcamp, soundcloud, musicbrainz (default: all)
 - `metadata.fallback_to_filename`: Fallback to filename parsing if no metadata found (default: true)
 - `metadata.enrich_tags`: Tags to write when enriching (default: label, genre, album, year, track_number)
 - `metadata.label_source_tag`: Tag name for label (default: label)
+- `soundcloud_confidence_threshold`: Minimum confidence score (0.0-1.0) for SoundCloud web search results (default: 0.6)
 
 Note: Unicode filename to ASCII conversion is now automatic and always applied to ensure compatibility with audio processing tools.
 
@@ -100,6 +101,10 @@ python3 convert.py *.wav                   # Batch (auto-parallel for 4+ files)
 python3 convert.py --m4a <file.wav>        # Single file to M4A
 python3 convert.py --m4a *.wav            # Batch to M4A
 
+# AIFF support (same as WAV)
+python3 convert.py --m4a *.aiff            # Convert AIFF files to M4A
+python3 convert.py *.wav *.aiff            # Mixed batch
+
 # Alternative format specification
 python3 convert.py --format m4a file.wav
 
@@ -126,15 +131,40 @@ Convert a single file with Unicode characters to MP3:
 python3 convert.py "Грег Эленис - Αγάπης Ti Fotiá.wav"
 ```
 
-Convert all WAV files in directory to M4A:
+Convert all WAV/AIFF files in directory to M4A:
 ```bash
-python3 convert.py --m4a *.wav
+python3 convert.py --m4a *.wav *.aiff
 ```
 
 Convert with custom parallel processing and disabled cover art:
 ```bash
 python3 convert.py --max-workers 2 --no-cover *.wav
 ```
+
+## SoundCloud Client ID
+
+Für die SoundCloud-Suche wird eine `client_id` benötigt. Diese wird automatisch aus der `.env`-Datei im Projektverzeichnis geladen (`SOUNDCLOUD_CLIENT_ID`).
+
+So findest du deine SoundCloud Client ID (Schritt-für-Schritt):
+
+1. **In SoundCloud einloggen** (mit deinem Account)
+2. **Einen Song/Radio starten** (ein Track soll spielen)
+3. **DevTools öffnen**: `Ctrl + Shift + I` (oder `F12`)
+4. **Network Tab auswählen**
+5. **Seite neu laden** (`Ctrl + R`)
+6. **Nach Requests suchen**, die `?client_id=` enthalten (z. B. `api-v2.soundcloud.com`)
+7. **Auf den Request klicken** → Headers öffnen
+8. **Die `client_id` aus der URL kopieren** (der Wert nach `client_id=` und vor dem nächsten `&`)
+
+Erstelle dann eine `.env`-Datei im Projektverzeichnis mit folgendem Inhalt:
+
+```bash
+SOUNDCLOUD_CLIENT_ID=deine_client_id_hier
+```
+
+Die `.env`-Datei wird automatisch geladen und ist in `.gitignore` eingetragen, damit deine Client-ID nicht versehentlich ins Repository gelangt.
+
+Ohne gültige Client-ID wird die SoundCloud-Suche übersprungen.
 
 ## Prerequisites
 
@@ -158,15 +188,15 @@ sudo apt install ffmpeg python3
 
 ## Cover Artwork Strategy
 
-1. **Source file**: Extract embedded cover from WAV
+1. **Source file**: Extract embedded cover from source
 2. **Local folder**: Look for `cover.png`, `cover.jpg`, or matching image files
-3. **Online search**: Deezer → MusicBrainz → Bandcamp (skipped in `--offline` mode)
+3. **Online search**: Configurable order via `metadata.sources` (default: SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz, skipped in `--offline` mode)
 
 ## Metadata Strategy
 
-### Metadata Lookup Sources (in priority order)
-1. **WAV tags**: Extract artist/title from embedded metadata via ffprobe
-2. **Online lookup**: iTunes → Deezer → Bandcamp → MusicBrainz
+### Metadata Lookup Sources (configurable order)
+1. **Source tags**: Extract artist/title from embedded metadata via ffprobe
+2. **Online lookup**: Configurable via `metadata.sources` (default: SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz)
 3. **Filename parsing**: Fallback to heuristic parsing of filename ("Artist - Title")
 
 ### Metadata Enrichment

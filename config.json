@@ -6,10 +6,11 @@
   "retry_attempts": 3,
   "timeout_seconds": 30,
   "fuzzy_threshold": 0.8,
+  "soundcloud_confidence_threshold": 0.6,
   "metadata": {
     "enabled": true,
     "offline": false,
-    "sources": ["itunes", "bandcamp", "musicbrainz", "deezer"],
+    "sources": ["soundcloud", "itunes", "deezer", "bandcamp", "musicbrainz"],
     "fallback_to_filename": true,
     "enrich_tags": ["label", "genre", "album", "year", "track_number"],
     "label_source_tag": "label"

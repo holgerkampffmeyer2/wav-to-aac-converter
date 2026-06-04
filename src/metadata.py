@@ -288,50 +288,78 @@ def _lookup_deezer(term: str):
     return None, None
 
 
-def lookup_online_metadata(base_name: str):
-    """Look up metadata online using multiple sources.
+def _lookup_soundcloud(search_term: str):
+    """Lookup track on SoundCloud via API v2 with confidence scoring."""
+    from .utils import search_soundcloud_api, try_soundcloud_api_result, load_config
+
+    if not search_term:
+        return None, None
+
+    artist_name, track_name = extract_metadata_from_filename(search_term)
+    if not track_name:
+        return None, None
+
+    query = f"{artist_name} {track_name}"
+    results = search_soundcloud_api(query)
+    if not results:
+        logger.debug(f"  SoundCloud: no API results for '{artist_name} - {track_name}'")
+        return None, None
+
+    config = load_config()
+    for track in results:
+        result = try_soundcloud_api_result(track, artist_name, track_name, config)
+        if result:
+            logger.debug(f"  SoundCloud found: {result['artist']} - {result['title']} (confidence {result['confidence']:.2f})")
+            return result['artist'], result['title']
+
+    return None, None
+
+
+METADATA_SOURCE_DISPATCH = {
+    'itunes': ('iTunes', _lookup_itunes),
+    'deezer': ('Deezer', _lookup_deezer),
+    'bandcamp': ('Bandcamp', _lookup_bandcamp),
+    'soundcloud': ('SoundCloud', _lookup_soundcloud),
+    'musicbrainz': ('MusicBrainz', _lookup_musicbrainz),
+}
+
+
+def lookup_online_metadata(base_name: str, sources: Optional[list] = None):
+    """Look up metadata online using configured sources.
     
-    Search order:
-    1. iTunes (primary - best for mainstream)
-    2. Deezer (good for European tracks)
-    3. Bandcamp (great for remixes, indie)
-    4. MusicBrainz (fallback for obscure)
+    Args:
+        base_name: Search term (artist + title)
+        sources: Ordered list of source names. If None, uses config.
+    
+    Returns:
+        (artist, title) tuple or (None, None)
     """
-    # Try iTunes first
-    artist, title = _lookup_itunes(base_name)
-    if artist and title:
-        logger.debug(f"  iTunes found: {artist} - {title}")
-        return artist, title
+    if sources is None:
+        sources = load_config().get('metadata', {}).get('sources', [
+            'itunes', 'deezer', 'bandcamp', 'soundcloud', 'musicbrainz'
+        ])
     
-    # Try Deezer
-    artist, title = _lookup_deezer(base_name)
-    if artist and title:
-        logger.debug(f"  Deezer found: {artist} - {title}")
-        return artist, title
-    
-    # Fallback to Bandcamp
-    artist, title = _lookup_bandcamp(base_name)
-    if artist and title:
-        logger.debug(f"  Bandcamp found: {artist} - {title}")
-        return artist, title
-    
-    # Last resort: MusicBrainz
-    artist, title = _lookup_musicbrainz(base_name)
-    if artist and title:
-        logger.debug(f"  MusicBrainz found: {artist} - {title}")
-        return artist, title
+    for source_name in sources:
+        source_entry = METADATA_SOURCE_DISPATCH.get(source_name.lower())
+        if not source_entry:
+            logger.warning(f"  Unknown metadata source: {source_name}")
+            continue
+        label, func = source_entry
+        artist, title = func(base_name)
+        if artist and title:
+            logger.debug(f"  {label} found: {artist} - {title}")
+            return artist, title
     
     return None, None
 
 
 @lru_cache(maxsize=256)
 def extract_metadata_from_filename(filename: str) -> Tuple[str, str]:
-    """Extract artist and title from filename."""
+    """Extract artist and title from filename (supports .wav, .aif, .aiff, .mp3, .m4a)."""
     import re
     
-    # Remove .wav extension
     name = filename
-    for ext in ['.wav', '.WAV', '.mp3', '.m4a']:
+    for ext in ['.wav', '.WAV', '.aif', '.aiff', '.AIF', '.AIFF', '.mp3', '.m4a']:
         if name.lower().endswith(ext):
             name = name[:-len(ext)]
             break

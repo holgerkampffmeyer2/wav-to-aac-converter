@@ -481,40 +481,42 @@ class TestConfigFeatures(unittest.TestCase):
     def test_load_config_defaults(self):
         """Test loading config with default values when file doesn't exist."""
         from src.utils import load_config
-        import tempfile
+        import json
         import os
+        from unittest.mock import patch, MagicMock
         
-        # Create a temporary directory and ensure config.json doesn't exist
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = os.path.join(tmpdir, 'config.json')
-            if os.path.exists(config_path):
-                os.remove(config_path)
-            
-            # Mock the config file path to point to our temp directory
-            with patch('src.utils.Path') as mock_path:
-                mock_instance = MagicMock()
-                mock_instance.parent.__truediv__.return_value = Path(config_path)
-                mock_path.return_value = mock_instance
-                
-                config = load_config()
-                expected = {
-                    "output_format": "mp3",
-                    "max_parallel_processes": 5,
-                    "loudnorm": True,
-                    "embed_cover": True,
-                    "retry_attempts": 3,
-                    "timeout_seconds": 30,
-                    "fuzzy_threshold": 0.8,
-                    "metadata": {
-                        "enabled": True,
-                        "offline": False,
-                        "sources": ["itunes", "bandcamp", "musicbrainz", "deezer"],
-                        "fallback_to_filename": True,
-                        "enrich_tags": ["label", "genre", "album", "year", "track_number"],
-                        "label_source_tag": "label"
-                    }
-                }
-                self.assertEqual(config, expected)
+        expected = {
+            "output_format": "mp3",
+            "max_parallel_processes": 5,
+            "loudnorm": True,
+            "embed_cover": True,
+            "retry_attempts": 3,
+            "timeout_seconds": 30,
+            "fuzzy_threshold": 0.8,
+            "soundcloud_confidence_threshold": 0.6,
+            "metadata": {
+                "enabled": True,
+                "offline": False,
+                "sources": ["soundcloud", "itunes", "deezer", "bandcamp", "musicbrainz"],
+                "fallback_to_filename": True,
+                "enrich_tags": ["label", "genre", "album", "year", "track_number"],
+                "label_source_tag": "label"
+            }
+        }
+        
+        # Save actual config and temporarily remove it
+        import shutil
+        orig = 'config.json'
+        backup = 'config.json.bak'
+        has_orig = os.path.exists(orig)
+        if has_orig:
+            shutil.move(orig, backup)
+        try:
+            config = load_config()
+            self.assertEqual(config, expected)
+        finally:
+            if has_orig:
+                shutil.move(backup, orig)
 
     def test_load_config_from_file(self):
         """Test loading config from an existing file works."""
@@ -545,8 +547,8 @@ class TestConfigFeatures(unittest.TestCase):
                 with open(config_path, 'w') as f:
                     json.dump(test_config, f)
                 
-        # Copy temp config to src directory (where load_config looks for it)
-                shutil.copy(config_path, 'src/config.json')
+                # Copy temp config to project root (where load_config looks for it)
+                shutil.copy(config_path, 'config.json')
                 
                 config = load_config()
                 self.assertEqual(config.get('output_format'), 'm4a')
@@ -556,10 +558,6 @@ class TestConfigFeatures(unittest.TestCase):
             # Restore original config
             if backup_config.exists():
                 shutil.move(str(backup_config), str(orig_config))
-            # Remove test config from src
-            src_config = Path('src/config.json')
-            if src_config.exists():
-                src_config.unlink()
 
     def test_parse_args_uses_config_defaults(self):
         """Test that argument parser uses config values as defaults."""
@@ -1869,6 +1867,182 @@ class TestSaveResultJSON(unittest.TestCase):
             metadata = {'artist': 'Test', 'title': 'Song'}
             result = save_result_json('test.wav', metadata, None, output_path, False, False, 'mp3')
             self.assertIsNone(result)
+
+class TestCalculateMatchConfidence(unittest.TestCase):
+    """Tests for confidence scoring of SoundCloud matches."""
+
+    def test_word_containment_multi_word(self):
+        """Multi-word artist/title found as words within longer string."""
+        from src.utils import calculate_match_confidence
+        result = calculate_match_confidence(
+            "Emmanuel Callejas Erick Cz", "The Rub 212",
+            "Emmanuel Callejas, Erick Cz - The Rub 212 [SLFREEDL062]"
+        )
+        self.assertGreaterEqual(result, 0.9)
+
+    def test_exact_match(self):
+        """Exact match returns 1.0."""
+        from src.utils import calculate_match_confidence
+        result = calculate_match_confidence("Test Artist", "Test Song", "Test Artist - Test Song")
+        self.assertAlmostEqual(result, 1.0, places=2)
+
+    def test_no_match(self):
+        """No match returns low score."""
+        from src.utils import calculate_match_confidence
+        result = calculate_match_confidence("Artist", "Song", "Some Completely Different Track")
+        self.assertLess(result, 0.5)
+
+    def test_single_word_artist(self):
+        """Single-word artist uses substring containment."""
+        from src.utils import calculate_match_confidence
+        result = calculate_match_confidence("Beyonce", "Crazy", "Beyonce - Crazy In Love [Radio]")
+        self.assertGreaterEqual(result, 0.9)
+
+    def test_empty_track_title(self):
+        """Empty found_track_title returns 0.0."""
+        from src.utils import calculate_match_confidence
+        result = calculate_match_confidence("Artist", "Title", "")
+        self.assertEqual(result, 0.0)
+
+    def test_empty_expected(self):
+        """Empty expected values treated as passing."""
+        from src.utils import calculate_match_confidence
+        result = calculate_match_confidence("", "Title", "Just Title Here")
+        self.assertGreaterEqual(result, 0.5)
+
+    def test_partial_word_match(self):
+        """Partial word match scores lower via fuzzy fallback."""
+        from src.utils import calculate_match_confidence
+        # "artist" not a substring of "arteest", but fuzzy matching picks it up
+        result = calculate_match_confidence("Artist", "Title", "Arteest - Tytle [mix]")
+        self.assertGreater(result, 0.3)
+        self.assertLess(result, 0.95)
+
+
+class TestSearchSoundcloudApi(unittest.TestCase):
+    """Tests for SoundCloud API v2 search."""
+
+    @patch('src.utils.fetch_url')
+    def test_returns_parsed_tracks(self, mock_fetch):
+        """API response is parsed into track list."""
+        mock_fetch.return_value = (
+            '{"collection": ['
+            '{"title": "Test Track", "user": {"username": "User"}, '
+            '"artwork_url": "https://i1.sndcdn.com/art-large.jpg", '
+            '"permalink_url": "https://soundcloud.com/user/test-track"}'
+            ']}'
+        )
+        with patch('src.utils.SOUNDCLOUD_CLIENT_ID', 'test-id'):
+            from src.utils import search_soundcloud_api
+            results = search_soundcloud_api('test query')
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]['title'], 'Test Track')
+
+    @patch('src.utils.fetch_url')
+    def test_empty_response(self, mock_fetch):
+        """Empty fetch returns empty list."""
+        mock_fetch.return_value = ""
+        with patch('src.utils.SOUNDCLOUD_CLIENT_ID', 'test-id'):
+            from src.utils import search_soundcloud_api
+            results = search_soundcloud_api('test query')
+            self.assertEqual(results, [])
+
+    @patch('src.utils.fetch_url')
+    def test_invalid_json(self, mock_fetch):
+        """Invalid JSON returns empty list."""
+        mock_fetch.return_value = "not json"
+        with patch('src.utils.SOUNDCLOUD_CLIENT_ID', 'test-id'):
+            from src.utils import search_soundcloud_api
+            results = search_soundcloud_api('test query')
+            self.assertEqual(results, [])
+
+    def test_no_client_id_returns_empty(self):
+        """Without client ID, returns empty list."""
+        with patch('src.utils.SOUNDCLOUD_CLIENT_ID', ''):
+            from src.utils import search_soundcloud_api
+            results = search_soundcloud_api('test query')
+            self.assertEqual(results, [])
+
+
+class TestTrySoundcloudApiResult(unittest.TestCase):
+    """Tests for SoundCloud API result confidence validation."""
+
+    def test_high_confidence_match(self):
+        """High confidence returns enriched data with artwork upgrade."""
+        from src.utils import try_soundcloud_api_result, load_config
+        track = {
+            'title': 'Test Artist - Test Song [Original Mix]',
+            'user': {'username': 'Uploader Name'},
+            'artwork_url': 'https://i1.sndcdn.com/art-large.jpg',
+            'permalink_url': 'https://soundcloud.com/uploader/test-artist-test-song',
+        }
+        result = try_soundcloud_api_result(track, 'Test Artist', 'Test Song', load_config())
+        self.assertIsNotNone(result)
+        self.assertEqual(result['artist'], 'Uploader Name')
+        self.assertEqual(result['title'], 'Test Artist - Test Song [Original Mix]')
+        self.assertIn('t500x500.jpg', result['thumbnail'])
+        self.assertGreaterEqual(result['confidence'], 0.9)
+
+    def test_low_confidence_returns_none(self):
+        """Low confidence match returns None."""
+        from src.utils import try_soundcloud_api_result
+        track = {
+            'title': 'Something Completely Different',
+            'user': {'username': 'Random'},
+            'artwork_url': 'https://i1.sndcdn.com/art-large.jpg',
+        }
+        config = {'soundcloud_confidence_threshold': 0.6}
+        result = try_soundcloud_api_result(track, 'Expected Artist', 'Expected Title', config)
+        self.assertIsNone(result)
+
+    def test_empty_title_returns_none(self):
+        """Track without title returns None."""
+        from src.utils import try_soundcloud_api_result
+        track = {'user': {'username': 'U'}, 'artwork_url': 'https://i1.sndcdn.com/art.jpg'}
+        result = try_soundcloud_api_result(track, 'A', 'B', {'soundcloud_confidence_threshold': 0.6})
+        self.assertIsNone(result)
+
+    def test_no_artwork_returns_match_without_thumbnail(self):
+        """Track without artwork still returns data but no thumbnail."""
+        from src.utils import try_soundcloud_api_result
+        track = {
+            'title': 'Artist - Song',
+            'user': {'username': 'Uploader'},
+            'artwork_url': '',
+            'permalink_url': 'https://soundcloud.com/u/artist-song',
+        }
+        result = try_soundcloud_api_result(track, 'Artist', 'Song', {'soundcloud_confidence_threshold': 0.6})
+        self.assertIsNotNone(result)
+        self.assertEqual(result['thumbnail'], '')
+
+    def test_configurable_threshold(self):
+        """Threshold from config is respected."""
+        from src.utils import try_soundcloud_api_result
+        track = {
+            'title': 'Partial Match [Mix]',
+            'user': {'username': 'U'},
+            'artwork_url': '',
+        }
+        # Low threshold accepts
+        result = try_soundcloud_api_result(track, 'Partial', 'Match', {'soundcloud_confidence_threshold': 0.1})
+        self.assertIsNotNone(result)
+        # High threshold with non-matching query rejects
+        track2 = {
+            'title': 'Completely Different Track',
+            'user': {'username': 'U'},
+            'artwork_url': '',
+        }
+        result2 = try_soundcloud_api_result(track2, 'Zebra', 'Unicorn', {'soundcloud_confidence_threshold': 0.6})
+        self.assertIsNone(result2)
+
+    def test_no_user_field(self):
+        """Track without user field still works."""
+        from src.utils import try_soundcloud_api_result
+        track = {'title': 'Artist - Song'}
+        result = try_soundcloud_api_result(track, 'Artist', 'Song', {'soundcloud_confidence_threshold': 0.6})
+        self.assertIsNotNone(result)
+        self.assertEqual(result['artist'], '')
+
 
 class TestRunCmdTimeout(unittest.TestCase):
     @patch('subprocess.run')
