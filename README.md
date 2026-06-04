@@ -143,28 +143,28 @@ python3 convert.py --max-workers 2 --no-cover *.wav
 
 ## SoundCloud Client ID
 
-Für die SoundCloud-Suche wird eine `client_id` benötigt. Diese wird automatisch aus der `.env`-Datei im Projektverzeichnis geladen (`SOUNDCLOUD_CLIENT_ID`).
+The SoundCloud search requires a `client_id`. It is loaded automatically from the `.env` file in the project directory (`SOUNDCLOUD_CLIENT_ID`).
 
-So findest du deine SoundCloud Client ID (Schritt-für-Schritt):
+To find your SoundCloud Client ID (step-by-step):
 
-1. **In SoundCloud einloggen** (mit deinem Account)
-2. **Einen Song/Radio starten** (ein Track soll spielen)
-3. **DevTools öffnen**: `Ctrl + Shift + I` (oder `F12`)
-4. **Network Tab auswählen**
-5. **Seite neu laden** (`Ctrl + R`)
-6. **Nach Requests suchen**, die `?client_id=` enthalten (z. B. `api-v2.soundcloud.com`)
-7. **Auf den Request klicken** → Headers öffnen
-8. **Die `client_id` aus der URL kopieren** (der Wert nach `client_id=` und vor dem nächsten `&`)
+1. **Log in to SoundCloud** (with your account)
+2. **Start a song/radio** (a track should be playing)
+3. **Open DevTools**: `Ctrl + Shift + I` (or `F12`)
+4. **Select the Network tab**
+5. **Reload the page** (`Ctrl + R`)
+6. **Search for requests** containing `?client_id=` (e.g., `api-v2.soundcloud.com`)
+7. **Click the request** → open the Headers section
+8. **Copy the `client_id` from the URL** (the value after `client_id=` and before the next `&`)
 
-Erstelle dann eine `.env`-Datei im Projektverzeichnis mit folgendem Inhalt:
+Then create a `.env` file in the project directory with:
 
 ```bash
-SOUNDCLOUD_CLIENT_ID=deine_client_id_hier
+SOUNDCLOUD_CLIENT_ID=your_client_id_here
 ```
 
-Die `.env`-Datei wird automatisch geladen und ist in `.gitignore` eingetragen, damit deine Client-ID nicht versehentlich ins Repository gelangt.
+The `.env` file is loaded automatically and listed in `.gitignore` to prevent accidentally committing your client ID.
 
-Ohne gültige Client-ID wird die SoundCloud-Suche übersprungen.
+Without a valid client ID, SoundCloud search is skipped.
 
 ## Prerequisites
 
