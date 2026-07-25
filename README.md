@@ -1,12 +1,57 @@
-# wav-to-mp3-converter
+# audioconvert
 
 ![AI-Powered Audio Conversion](assets/ai-powered.png)
 
-[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)](https://github.com/holgerkampffmeyer2/wav-to-aac-converter)
+[![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)](https://github.com/holgerkampffmeyer2/wav-to-aac-converter)
 [![License](https://img.shields.io/github/license/holgerkampffmeyer2/wav-to-aac-converter)](https://github.com/holgerkampffmeyer2/wav-to-aac-converter)
 [![Tests](https://github.com/holgerkampffmeyer2/wav-to-aac-converter/actions/workflows/test.yml/badge.svg)](https://github.com/holgerkampffmeyer2/wav-to-aac-converter/actions/workflows/test.yml)
 
-AI-agent driven WAV/AIFF/FLAC to MP3/M4A conversion with loudness normalization, metadata extraction, and cover art embedding.
+WAV/AIFF/FLAC to MP3/M4A conversion with loudness normalization, metadata extraction, and cover art embedding.
+
+## Installation
+
+### Option 1: Standalone Binary (Recommended)
+
+Download the latest release for your platform from [GitHub Releases](https://github.com/holgerkampffmeyer2/wav-to-aac-converter/releases):
+
+```bash
+# Linux (amd64)
+tar xzf audioconvert-linux-amd64.tar.gz
+./audioconvert --version
+
+# macOS (Apple Silicon)
+tar xzf audioconvert-macos-arm64.tar.gz
+./audioconvert --version
+
+# macOS (Intel)
+tar xzf audioconvert-macos-x86_64.tar.gz
+./audioconvert --version
+```
+
+No Python or ffmpeg installation required — everything is bundled.
+
+### Option 2: pip Install
+
+```bash
+pip install audioconvert
+```
+
+Requires `ffmpeg` and `ffprobe` to be installed:
+```bash
+# Debian/Ubuntu
+sudo apt install ffmpeg
+
+# macOS
+brew install ffmpeg
+```
+
+### Option 3: From Source
+
+```bash
+git clone https://github.com/holgerkampffmeyer2/wav-to-aac-converter.git
+cd wav-to-aac-converter
+pip install -e .
+```
 
 ## How It Works
 
@@ -94,27 +139,27 @@ opencode
 
 ```bash
 # MP3 output (default)
-python3 convert.py <file.wav>              # Single file
-python3 convert.py *.wav                   # Batch (auto-parallel for 4+ files)
+audioconvert <file.wav>              # Single file
+audioconvert *.wav                   # Batch (auto-parallel for 4+ files)
 
 # M4A output
-python3 convert.py --m4a <file.wav>        # Single file to M4A
-python3 convert.py --m4a *.wav            # Batch to M4A
+audioconvert --m4a <file.wav>        # Single file to M4A
+audioconvert --m4a *.wav            # Batch to M4A
 
 # FLAC support
-python3 convert.py --m4a *.flac            # Convert FLAC files to M4A
-python3 convert.py *.wav *.flac            # Mixed batch
+audioconvert --m4a *.flac            # Convert FLAC files to M4A
+audioconvert *.wav *.flac            # Mixed batch
 
 # AIFF support
-python3 convert.py --m4a *.aiff            # Convert AIFF files to M4A
-python3 convert.py *.wav *.aiff *.flac     # Mixed batch
+audioconvert --m4a *.aiff            # Convert AIFF files to M4A
+audioconvert *.wav *.aiff *.flac     # Mixed batch
 
 # Alternative format specification
-python3 convert.py --format m4a file.wav
+audioconvert --format m4a file.wav
 
 # Metadata options
-python3 convert.py --no-metadata file.wav    # Disable online metadata lookup and enrichment (default: enabled)
-python3 convert.py --offline file.wav        # Offline mode: no online lookups, local cover only
+audioconvert --no-metadata file.wav    # Disable online metadata lookup and enrichment (default: enabled)
+audioconvert --offline file.wav        # Offline mode: no online lookups, local cover only
 ```
 
 ## Unicode Filename Handling
@@ -132,17 +177,17 @@ This avoids issues with ffmpeg and other tools that may not handle Unicode filen
 
 Convert a single file with Unicode characters to MP3:
 ```bash
-python3 convert.py "Грег Эленис - Αγάπης Ti Fotiá.wav"
+audioconvert "Грег Эленис - Αγάπης Ti Fotiá.wav"
 ```
 
 Convert all WAV/AIFF/FLAC files in directory to M4A:
 ```bash
-python3 convert.py --m4a *.wav *.aiff *.flac
+audioconvert --m4a *.wav *.aiff *.flac
 ```
 
 Convert with custom parallel processing and disabled cover art:
 ```bash
-python3 convert.py --max-workers 2 --no-cover *.wav
+audioconvert --max-workers 2 --no-cover *.wav
 ```
 
 ## SoundCloud Client ID
@@ -246,6 +291,19 @@ python3 -m unittest tests.test_convert
 
 # Run with verbose output
 python3 -m unittest tests.test_convert -v
+```
+
+## Building from Source
+
+```bash
+# Install build dependencies
+pip install pyinstaller
+
+# Build standalone binary
+pyinstaller pyinstaller/convert.spec
+
+# Binary is in dist/audioconvert/
+./dist/audioconvert/audioconvert --version
 ```
 
 ## For AI Agents

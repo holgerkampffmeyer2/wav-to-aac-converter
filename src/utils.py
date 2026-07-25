@@ -10,10 +10,21 @@ from functools import wraps
 
 logger = logging.getLogger(__name__)
 
+
+def get_config_dir() -> Path:
+    """Return config directory: ~/.config/audioconvert/ for bundles, project root for scripts."""
+    import sys
+    if getattr(sys, 'frozen', False):
+        config_dir = Path.home() / '.config' / 'audioconvert'
+    else:
+        config_dir = Path(__file__).parent.parent
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir
+
 # === Environment ===
 def _load_env() -> dict:
-    """Load environment variables from .env file in project root."""
-    env_path = Path(__file__).parent.parent / '.env'
+    """Load environment variables from .env file in config directory."""
+    env_path = get_config_dir() / '.env'
     env_vars = {}
     if env_path.exists():
         with open(env_path) as f:
@@ -115,7 +126,7 @@ def retry(max_attempts: int = RETRY_ATTEMPTS, delay: int = RETRY_DELAY, backoff:
 def load_config() -> Dict[str, Any]:
     """Load configuration from config.json file."""
     from pathlib import Path
-    config_path = Path(__file__).parent.parent / 'config.json'
+    config_path = get_config_dir() / 'config.json'
     default_config: Dict[str, Any] = {
         "output_format": "mp3",
         "max_parallel_processes": 5,

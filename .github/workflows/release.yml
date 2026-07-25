@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pyinstaller
+
+      - name: Download ffmpeg (static)
+        run: |
+          curl -L -o ffmpeg.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+          tar xf ffmpeg.tar.xz
+          cp ffmpeg-*-static/ffmpeg pyinstaller/ffmpeg
+          chmod +x pyinstaller/ffmpeg
+
+      - name: Build binary
+        run: pyinstaller pyinstaller/convert.spec
+
+      - name: Create archive
+        run: |
+          cd dist/audioconvert
+          tar czf ../audioconvert-linux-amd64.tar.gz *
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-amd64
+          path: dist/audioconvert-linux-amd64.tar.gz
+
+  build-macos:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [arm64, x86_64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pyinstaller
+
+      - name: Download ffmpeg (static)
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            curl -L -o ffmpeg.zip https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip
+          else
+            curl -L -o ffmpeg.zip https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip?arch=x86_64
+          fi
+          unzip ffmpeg.zip -d pyinstaller/
+          chmod +x pyinstaller/ffmpeg
+
+      - name: Build binary
+        run: pyinstaller pyinstaller/convert.spec
+
+      - name: Create archive
+        run: |
+          cd dist/audioconvert
+          tar czf ../audioconvert-macos-${{ matrix.arch }}.tar.gz *
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: dist/audioconvert-macos-${{ matrix.arch }}.tar.gz
+
+  release:
+    needs: [build-linux, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            linux-amd64/audioconvert-linux-amd64.tar.gz
+            macos-arm64/audioconvert-macos-arm64.tar.gz
+            macos-x86_64/audioconvert-macos-x86_64.tar.gz
+          generate_release_notes: true
+          draft: false
+          prerelease: false

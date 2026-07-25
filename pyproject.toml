@@ -1,17 +1,17 @@
 [project]
-name = "optimize-music-prompts"
-version = "2.0.0"
-description = "WAV to AAC converter with loudness normalization, metadata, and cover art"
+name = "audioconvert"
+version = "1.0.0"
+description = "WAV/AIFF/FLAC to MP3/M4A converter with loudness normalization, metadata, and cover art"
 authors = [
     {name = "Holger Kampffmeyer", email = "holger.kampffmeyer+dj@gmail.com"}
 ]
 license = {text = "MIT"}
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 dependencies = []
 
 [project.scripts]
-convert = "convert:convert_file"
+audioconvert = "src.convert:main"
 
 [project.optional-dependencies]
 dev = [

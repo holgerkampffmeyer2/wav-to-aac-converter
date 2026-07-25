@@ -12,6 +12,10 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict, Any
 
 # Import from modules
+try:
+    from . import __version__
+except ImportError:
+    __version__ = "unknown"
 from .utils import (
     logger,
     load_config,
@@ -250,6 +254,7 @@ def parse_args():
     config = load_config()
     
     parser = argparse.ArgumentParser(description='Convert WAV to MP3/M4A with metadata and cover art')
+    parser.add_argument('--version', action='version', version=f'audioconvert {__version__}')
     parser.add_argument('files', nargs='+', help='WAV/AIFF/FLAC file(s) to convert')
     parser.add_argument('--format', default=config.get('output_format', 'mp3'), choices=['mp3', 'm4a'], help='Output format')
     parser.add_argument('--m4a', action='store_true', help='Output to M4A format')
