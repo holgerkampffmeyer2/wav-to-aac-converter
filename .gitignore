@@ -50,3 +50,6 @@ cover_*.jpg
 output_*.m4a
 result_*.json
 .env
+
+# AI tools
+.serena/
