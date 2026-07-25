@@ -1,6 +1,6 @@
 [project]
 name = "audioconvert"
-version = "1.0.0"
+dynamic = ["version"]
 description = "WAV/AIFF/FLAC to MP3/M4A converter with loudness normalization, metadata, and cover art"
 authors = [
     {name = "Holger Kampffmeyer", email = "holger.kampffmeyer+dj@gmail.com"}
@@ -21,6 +21,9 @@ dev = [
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = {attr = "src.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
