@@ -10,7 +10,7 @@ WAV/AIFF/FLAC to MP3/M4A conversion with loudness normalization, metadata extrac
 
 ## Installation
 
-### Option 1: One-Line Install (Recommended)
+### One-Line Install (Recommended)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/holgerkampffmeyer2/wav-to-aac-converter/main/install.sh | bash
@@ -23,42 +23,9 @@ Custom install directory:
 INSTALL_DIR=~/bin curl -fsSL https://raw.githubusercontent.com/holgerkampffmeyer2/wav-to-aac-converter/main/install.sh | bash
 ```
 
-### Option 2: Standalone Binary (Manual)
+### From Source (Experts)
 
-Download the latest release for your platform from [GitHub Releases](https://github.com/holgerkampffmeyer2/wav-to-aac-converter/releases):
-
-```bash
-# Linux (amd64)
-tar xzf audioconvert-linux-amd64.tar.gz
-./audioconvert --version
-
-# macOS (Apple Silicon)
-tar xzf audioconvert-macos-arm64.tar.gz
-./audioconvert --version
-
-# macOS (Intel)
-tar xzf audioconvert-macos-x86_64.tar.gz
-./audioconvert --version
-```
-
-No Python or ffmpeg installation required — everything is bundled.
-
-### Option 3: pip Install
-
-```bash
-pip install audioconvert
-```
-
-Requires `ffmpeg` and `ffprobe` to be installed:
-```bash
-# Debian/Ubuntu
-sudo apt install ffmpeg
-
-# macOS
-brew install ffmpeg
-```
-
-### Option 4: From Source
+Requires Python 3.9+, ffmpeg, and ffprobe.
 
 ```bash
 git clone https://github.com/holgerkampffmeyer2/wav-to-aac-converter.git
@@ -291,6 +258,7 @@ wav-to-aac-converter/
 ├── LICENSE                # MIT license
 ├── config.json            # Configuration file
 ├── convert.py            # CLI entry point (wrapper)
+├── install.sh            # One-line install script
 ├── pyproject.toml        # Python project config
 ├── *.wav / *.flac         # Source files
 └── *.mp3 / *.m4a        # Converted output

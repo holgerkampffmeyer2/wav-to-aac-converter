@@ -184,6 +184,34 @@ The test suite covers:
 - Edge cases (Unicode, special characters, empty values)
 - Metadata enrichment (label, genre, album, year, track_number)
 
+## Release Workflow
+
+To create a new release:
+
+1. **Bump version** in `src/__init__.py` (single source of truth):
+   ```python
+   __version__ = "1.1.0"
+   ```
+
+2. **Commit changes**:
+   ```bash
+   git add -A && git commit -m "chore: bump version to 1.1.0"
+   git push
+   ```
+
+3. **Create tag and push**:
+   ```bash
+   git tag v1.1.0
+   git push --tags
+   ```
+
+This triggers the GitHub Actions `release.yml` workflow which:
+- Builds standalone binaries for Linux (amd64) and macOS (arm64, x86_64)
+- Bundles static ffmpeg in each binary
+- Creates a GitHub Release with all 3 archives
+
+The version is defined only in `src/__init__.py`. `pyproject.toml` reads it dynamically via `[tool.setuptools.dynamic]`.
+
 ## File Structure
 
 ```
@@ -206,6 +234,7 @@ wav-to-aac-converter/
 ├── LICENSE                # MIT license
 ├── config.json            # Configuration file
 ├── convert.py            # CLI entry point (wrapper)
+├── install.sh            # One-line install script
 ├── pyproject.toml        # Python project config
 ├── *.wav / *.flac         # Source files
 └── *.mp3 / *.m4a        # Converted output
