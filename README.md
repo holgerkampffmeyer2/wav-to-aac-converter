@@ -10,7 +10,20 @@ WAV/AIFF/FLAC to MP3/M4A conversion with loudness normalization, metadata extrac
 
 ## Installation
 
-### Option 1: Standalone Binary (Recommended)
+### Option 1: One-Line Install (Recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/holgerkampffmeyer2/wav-to-aac-converter/main/install.sh | bash
+```
+
+Detects your platform (Linux/macOS), downloads the matching binary with bundled ffmpeg, and installs to `/usr/local/bin`.
+
+Custom install directory:
+```bash
+INSTALL_DIR=~/bin curl -fsSL https://raw.githubusercontent.com/holgerkampffmeyer2/wav-to-aac-converter/main/install.sh | bash
+```
+
+### Option 2: Standalone Binary (Manual)
 
 Download the latest release for your platform from [GitHub Releases](https://github.com/holgerkampffmeyer2/wav-to-aac-converter/releases):
 
@@ -30,7 +43,7 @@ tar xzf audioconvert-macos-x86_64.tar.gz
 
 No Python or ffmpeg installation required — everything is bundled.
 
-### Option 2: pip Install
+### Option 3: pip Install
 
 ```bash
 pip install audioconvert
@@ -45,7 +58,7 @@ sudo apt install ffmpeg
 brew install ffmpeg
 ```
 
-### Option 3: From Source
+### Option 4: From Source
 
 ```bash
 git clone https://github.com/holgerkampffmeyer2/wav-to-aac-converter.git
