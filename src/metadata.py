@@ -355,11 +355,11 @@ def lookup_online_metadata(base_name: str, sources: Optional[list] = None):
 
 @lru_cache(maxsize=256)
 def extract_metadata_from_filename(filename: str) -> Tuple[str, str]:
-    """Extract artist and title from filename (supports .wav, .aif, .aiff, .mp3, .m4a)."""
+    """Extract artist and title from filename (supports .wav, .aif, .aiff, .flac, .mp3, .m4a)."""
     import re
     
     name = filename
-    for ext in ['.wav', '.WAV', '.aif', '.aiff', '.AIF', '.AIFF', '.mp3', '.m4a']:
+    for ext in ['.wav', '.WAV', '.aif', '.aiff', '.AIF', '.AIFF', '.flac', '.FLAC', '.mp3', '.m4a']:
         if name.lower().endswith(ext):
             name = name[:-len(ext)]
             break

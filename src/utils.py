@@ -241,6 +241,49 @@ def calculate_match_confidence(expected_artist: str, expected_title: str, found_
     return (scores[0] + scores[1]) / 2
 
 
+def validate_soundcloud_client_id() -> bool:
+    """Validate SoundCloud client ID with a lightweight API probe.
+
+    Returns True if the ID is valid, False otherwise.
+    Logs a warning with remediation steps when invalid.
+    """
+    import json
+
+    if not SOUNDCLOUD_CLIENT_ID:
+        return False
+
+    url = (f"https://api-v2.soundcloud.com/search/tracks"
+           f"?q=test&client_id={SOUNDCLOUD_CLIENT_ID}&limit=1")
+    content = fetch_url(url, timeout=10)
+    if not content:
+        logger.warning(
+            "SoundCloud client ID validation failed — no response. "
+            "SoundCloud metadata/cover search will be unavailable."
+        )
+        return False
+
+    try:
+        data = json.loads(content)
+        if 'collection' in data:
+            return True
+        if data.get('errors'):
+            logger.warning(
+                "SoundCloud client ID is invalid or expired (API returned errors). "
+                "To fix: open SoundCloud in your browser, play a track, open DevTools "
+                "(F12) → Network tab, reload, find a request with '?client_id=', "
+                "copy the client_id value and update .env: "
+                "SOUNDCLOUD_CLIENT_ID=<new_id>"
+            )
+            return False
+    except json.JSONDecodeError:
+        pass
+
+    logger.warning(
+        "SoundCloud client ID validation failed — unexpected response. "
+        "SoundCloud metadata/cover search will be unavailable."
+    )
+    return False
+
 def search_soundcloud_api(query: str, limit: int = 5) -> list:
     """Search SoundCloud via API v2. Returns list of track result dicts."""
     import json

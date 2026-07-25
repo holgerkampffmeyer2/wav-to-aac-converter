@@ -226,21 +226,50 @@ class TestLocalCoverSearch(unittest.TestCase):
         result = find_local_cover(str(wav_path))
         self.assertEqual(result, str(cover_path))
 
-    def test_any_image_in_folder(self):
-        """Find any image file when no specific cover found."""
-        wav_path = Path(self.test_dir) / "song.wav"
-        any_image = Path(self.test_dir) / "any_image.png"
-        any_image.touch()
-        wav_path.touch()
-        result = find_local_cover(str(wav_path))
-        self.assertEqual(result, str(any_image))
-
     def test_no_cover_found(self):
         """Return None when no cover exists."""
         wav_path = Path(self.test_dir) / "song.wav"
         wav_path.touch()
         result = find_local_cover(str(wav_path))
         self.assertIsNone(result)
+
+    def test_no_false_match_with_other_covers(self):
+        """Return None when other tracks have covers but this one doesn't."""
+        wav_path = Path(self.test_dir) / "Raven Musik - Track.wav"
+        other_cover = Path(self.test_dir) / "Woops.png"
+        other_cover.touch()
+        wav_path.touch()
+        result = find_local_cover(str(wav_path))
+        self.assertIsNone(result)
+
+    def test_fuzzy_match_normalized(self):
+        """Find cover via normalized fuzzy match (separators removed)."""
+        wav_path = Path(self.test_dir) / "Artist - Title (Remix).wav"
+        cover_path = Path(self.test_dir) / "Artist - Title (Remix).png"
+        cover_path.touch()
+        wav_path.touch()
+        result = find_local_cover(str(wav_path))
+        self.assertEqual(result, str(cover_path))
+
+    def test_fuzzy_match_ignores_separators(self):
+        """Fuzzy match works across underscore/hyphen/space differences."""
+        wav_path = Path(self.test_dir) / "My_Cool-Track.wav"
+        cover_path = Path(self.test_dir) / "My Cool Track.png"
+        cover_path.touch()
+        wav_path.touch()
+        result = find_local_cover(str(wav_path))
+        self.assertEqual(result, str(cover_path))
+
+    def test_exact_match_takes_priority(self):
+        """Exact filename match preferred over other images."""
+        wav_path = Path(self.test_dir) / "MySong.wav"
+        exact_cover = Path(self.test_dir) / "MySong.png"
+        other_cover = Path(self.test_dir) / "random_image.jpg"
+        exact_cover.touch()
+        other_cover.touch()
+        wav_path.touch()
+        result = find_local_cover(str(wav_path))
+        self.assertEqual(result, str(exact_cover))
 
 
 class TestEdgeCases(unittest.TestCase):
@@ -740,7 +769,7 @@ class TestOnlineMetadataLookup(unittest.TestCase):
                 }]
             })
         ]
-        artist, title = lookup_online_metadata("MB Song")
+        artist, title = lookup_online_metadata("MB Song", sources=['itunes', 'deezer', 'bandcamp', 'musicbrainz'])
         self.assertEqual(artist, "MB Artist")
         self.assertEqual(title, "MB Song")
 

@@ -1,6 +1,6 @@
-# Audio Conversion: WAV/AIFF to MP3/M4A
+# Audio Conversion: WAV/AIFF/FLAC to MP3/M4A
 
-AI agent workflow for converting WAV/AIFF files to MP3 or M4A with loudness normalization, metadata, and cover art. Designed for AI coding assistants like [opencode](https://opencode.ai) or Claude Code.
+AI agent workflow for converting WAV/AIFF/FLAC files to MP3 or M4A with loudness normalization, metadata, and cover art. Designed for AI coding assistants like [opencode](https://opencode.ai) or Claude Code.
 
 ## Agent Instructions
 
@@ -38,11 +38,13 @@ sudo apt update && sudo apt install ffmpeg python3
 python3 convert.py <file.wav>              # Single file
 python3 convert.py *.wav                   # Batch (auto-parallel for 4+ files)
 python3 convert.py *.aiff                 # AIFF files also supported
+python3 convert.py *.flac                 # FLAC files also supported
 
 # M4A output
 python3 convert.py --m4a <file.wav>        # Single file to M4A
 python3 convert.py --m4a *.wav             # Batch to M4A
-python3 convert.py --m4a *.aiff *.wav     # Mixed WAV/AIFF batch
+python3 convert.py --m4a *.aiff *.wav     # Mixed WAV/AIFF/FLAC batch
+python3 convert.py --m4a *.flac           # FLAC to M4A
 
 # Offline mode (no online lookups, local cover only)
 python3 convert.py --offline <file.wav>    # Single file offline
@@ -80,8 +82,8 @@ When `metadata.enabled` is true (default), missing tags are written to the WAV f
 - Caching prevents duplicate API calls for the same track
 
 ### Cover Artwork Strategy
-1. **Source file**: Extract embedded cover from source
-2. **Local folder**: Look for `cover.png`, `cover.jpg`, or matching image files
+1. **Source file**: Extract embedded cover from source (WAV/FLAC/AIFF)
+2. **Local folder**: Look for `cover.png`, `cover.jpg`, or exact filename match. No fallback to arbitrary images.
 3. **Web search**: Configurable via `metadata.sources` (default: SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz, skipped in `--offline` mode)
 
 SoundCloud cover search uses the **SoundCloud API v2** (via `api-v2.soundcloud.com`) with **confidence scoring**. A `SOUNDCLOUD_CLIENT_ID` must be set in `.env`. Results below `soundcloud_confidence_threshold` (default: 0.6) are rejected and the next source is tried.
@@ -152,7 +154,7 @@ sudo apt install ffmpeg python3
 
 - **Codecs**: MP3 (libmp3lame) or M4A/AAC, 320kbps
 - **Loudness**: True Peak ≤ -0.1 dBTP (auto-calculated gain)
-- **Cover Sources**: Source (embedded) → Local folder → SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz
+- **Cover Sources**: Source (embedded) → Local folder (exact match only) → SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz
 - **Retry Logic**: 3 attempts with exponential backoff
 - **Metadata Sources**: Source tags → SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz → filename parsing (order configurable via `metadata.sources`)
 - **Enrichment Tags**: label, genre, album, year, track_number (if metadata enabled)
@@ -205,6 +207,6 @@ wav-to-aac-converter/
 ├── config.json            # Configuration file
 ├── convert.py            # CLI entry point (wrapper)
 ├── pyproject.toml        # Python project config
-├── *.wav                 # Source files
+├── *.wav / *.flac         # Source files
 └── *.mp3 / *.m4a        # Converted output
 ```

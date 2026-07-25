@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WAV/AIFF to MP3/M4A converter with loudness normalization, metadata, and cover art."""
+"""WAV/AIFF/FLAC to MP3/M4A converter with loudness normalization, metadata, and cover art."""
 
 import argparse
 import logging
@@ -17,6 +17,7 @@ from .utils import (
     load_config,
     to_ascii_filename,
     clean_title_for_search,
+    validate_soundcloud_client_id,
     DEFAULT_TIMEOUT,
     DEFAULT_BITRATE,
     ENCODE_TIMEOUT,
@@ -249,7 +250,7 @@ def parse_args():
     config = load_config()
     
     parser = argparse.ArgumentParser(description='Convert WAV to MP3/M4A with metadata and cover art')
-    parser.add_argument('files', nargs='+', help='WAV/AIFF file(s) to convert')
+    parser.add_argument('files', nargs='+', help='WAV/AIFF/FLAC file(s) to convert')
     parser.add_argument('--format', default=config.get('output_format', 'mp3'), choices=['mp3', 'm4a'], help='Output format')
     parser.add_argument('--m4a', action='store_true', help='Output to M4A format')
     parser.add_argument('--max-workers', type=int, default=config.get('max_parallel_processes', 5), help='Max parallel processes')
@@ -280,11 +281,14 @@ def main():
         config['metadata']['enabled'] = False
         config['metadata']['offline'] = True
     
-    audio_extensions = ('.wav', '.WAV', '.aif', '.aiff', '.AIF', '.AIFF')
+    if not args.offline and config['metadata'].get('enabled', True):
+        validate_soundcloud_client_id()
+    
+    audio_extensions = ('.wav', '.WAV', '.aif', '.aiff', '.AIF', '.AIFF', '.flac', '.FLAC')
     audio_files = [f for f in args.files if f.lower().endswith(audio_extensions)]
     
     if not audio_files:
-        logger.error("Error: No WAV/AIFF files found")
+        logger.error("Error: No WAV/AIFF/FLAC files found")
         sys.exit(1)
     
     if args.m4a:

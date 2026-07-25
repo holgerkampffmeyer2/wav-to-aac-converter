@@ -6,7 +6,7 @@
 [![License](https://img.shields.io/github/license/holgerkampffmeyer2/wav-to-aac-converter)](https://github.com/holgerkampffmeyer2/wav-to-aac-converter)
 [![Tests](https://github.com/holgerkampffmeyer2/wav-to-aac-converter/actions/workflows/test.yml/badge.svg)](https://github.com/holgerkampffmeyer2/wav-to-aac-converter/actions/workflows/test.yml)
 
-AI-agent driven WAV/AIFF to MP3/M4A conversion with loudness normalization, metadata extraction, and cover art embedding.
+AI-agent driven WAV/AIFF/FLAC to MP3/M4A conversion with loudness normalization, metadata extraction, and cover art embedding.
 
 ## How It Works
 
@@ -101,9 +101,13 @@ python3 convert.py *.wav                   # Batch (auto-parallel for 4+ files)
 python3 convert.py --m4a <file.wav>        # Single file to M4A
 python3 convert.py --m4a *.wav            # Batch to M4A
 
-# AIFF support (same as WAV)
+# FLAC support
+python3 convert.py --m4a *.flac            # Convert FLAC files to M4A
+python3 convert.py *.wav *.flac            # Mixed batch
+
+# AIFF support
 python3 convert.py --m4a *.aiff            # Convert AIFF files to M4A
-python3 convert.py *.wav *.aiff            # Mixed batch
+python3 convert.py *.wav *.aiff *.flac     # Mixed batch
 
 # Alternative format specification
 python3 convert.py --format m4a file.wav
@@ -131,9 +135,9 @@ Convert a single file with Unicode characters to MP3:
 python3 convert.py "Грег Эленис - Αγάπης Ti Fotiá.wav"
 ```
 
-Convert all WAV/AIFF files in directory to M4A:
+Convert all WAV/AIFF/FLAC files in directory to M4A:
 ```bash
-python3 convert.py --m4a *.wav *.aiff
+python3 convert.py --m4a *.wav *.aiff *.flac
 ```
 
 Convert with custom parallel processing and disabled cover art:
@@ -164,7 +168,7 @@ SOUNDCLOUD_CLIENT_ID=your_client_id_here
 
 The `.env` file is loaded automatically and listed in `.gitignore` to prevent accidentally committing your client ID.
 
-Without a valid client ID, SoundCloud search is skipped.
+Without a valid client ID, SoundCloud search is skipped. The converter validates the client ID at startup and logs a warning with remediation steps if it is invalid or expired.
 
 ## Prerequisites
 
@@ -188,8 +192,8 @@ sudo apt install ffmpeg python3
 
 ## Cover Artwork Strategy
 
-1. **Source file**: Extract embedded cover from source
-2. **Local folder**: Look for `cover.png`, `cover.jpg`, or matching image files
+1. **Source file**: Extract embedded cover from source (WAV/FLAC/AIFF)
+2. **Local folder**: Look for `cover.png`, `cover.jpg`, or exact filename match. No fallback to arbitrary images in the folder.
 3. **Online search**: Configurable order via `metadata.sources` (default: SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz, skipped in `--offline` mode)
 
 ## Metadata Strategy
@@ -230,7 +234,7 @@ wav-to-aac-converter/
 ├── config.json            # Configuration file
 ├── convert.py            # CLI entry point (wrapper)
 ├── pyproject.toml        # Python project config
-├── *.wav                 # Source files
+├── *.wav / *.flac         # Source files
 └── *.mp3 / *.m4a        # Converted output
 ```
 
