@@ -253,7 +253,10 @@ def parse_args():
     """Parse command line arguments."""
     config = load_config()
     
-    parser = argparse.ArgumentParser(description='Convert WAV to MP3/M4A with metadata and cover art')
+    parser = argparse.ArgumentParser(
+        description='Convert WAV to MP3/M4A with metadata and cover art',
+        epilog='Author: Holger Kampffmeyer (DJ Hulk) — https://holger-kampffmeyer.de'
+    )
     parser.add_argument('--version', action='version', version=f'audioconvert {__version__}')
     parser.add_argument('files', nargs='+', help='WAV/AIFF/FLAC file(s) to convert')
     parser.add_argument('--format', default=config.get('output_format', 'mp3'), choices=['mp3', 'm4a'], help='Output format')
