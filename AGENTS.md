@@ -212,6 +212,22 @@ This triggers the GitHub Actions `release.yml` workflow which:
 
 The version is defined only in `src/__init__.py`. `pyproject.toml` reads it dynamically via `[tool.setuptools.dynamic]`.
 
+## OpenSpec Feature Development
+
+This project uses OpenSpec for spec-driven development. To define and implement future features:
+
+1. **Create a new change**:
+   ```bash
+   openspec new change "<feature-name>"
+   ```
+2. **Define artifacts**: Fill in `proposal.md`, `design.md`, `tasks.md`, and delta specs under `openspec/changes/<feature-name>/specs/`.
+3. **Apply & Implement**: Implement the feature according to the specs and tasks.
+4. **Archive & Sync**:
+   ```bash
+   openspec archive <feature-name> -y
+   ```
+
+
 ## File Structure
 
 ```
@@ -219,6 +235,8 @@ wav-to-aac-converter/
 ├── .git/                  # Git repository
 ├── .github/               # GitHub workflows
 ├── .gitignore             # Git ignore rules
+├── .opencode/             # OpenSpec agent workflows & commands
+├── openspec/              # OpenSpec specifications & changes
 ├── assets/                # Images and static assets
 ├── src/                   # Source code
 │   ├── __init__.py
