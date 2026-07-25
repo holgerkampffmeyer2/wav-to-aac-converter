@@ -44,12 +44,13 @@ tar xzf "${TMP_DIR}/${ARCHIVE}" -C "$TMP_DIR"
 if [ -w "$INSTALL_DIR" ]; then
     cp "${TMP_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
     [ -d "${TMP_DIR}/_internal" ] && cp -r "${TMP_DIR}/_internal" "${INSTALL_DIR}/_internal"
+    chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
 else
     echo "Installing to ${INSTALL_DIR} (may need sudo)..."
     sudo cp "${TMP_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
     [ -d "${TMP_DIR}/_internal" ] && sudo cp -r "${TMP_DIR}/_internal" "${INSTALL_DIR}/_internal"
+    sudo chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
 fi
-chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
 
 echo "Installed: ${INSTALL_DIR}/${BINARY_NAME}"
 echo "Run: ${BINARY_NAME} --version"
