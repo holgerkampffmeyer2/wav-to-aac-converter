@@ -6,6 +6,7 @@ import sys
 import os
 import tempfile
 import json
+import shlex
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -1533,6 +1534,84 @@ class TestEnrichAndSearchCover(unittest.TestCase):
             call_args = mock_find_cover.call_args[0]
             self.assertTrue(call_args[4])  # offline is the 5th positional arg
 
+    def test_enrich_and_search_cover_disambiguates_title_artist(self):
+        """'Title - Artist' filenames get corrected via online metadata."""
+        wav_path = os.path.join(self.test_dir, "test.wav")
+        config = {'metadata': {'enabled': True, 'fallback_to_filename': True}}
+        
+        with patch('src.metadata.extract_metadata', return_value={}), \
+             patch('src.metadata.extract_metadata_from_filename', return_value=('Let me think about it', 'Ida Corr Fedde Le Grand (Kefrennnn Remix)')), \
+             patch('src.metadata.resolve_artist_title_online', return_value=('Ida Corr', 'Let Me Think About It (Fedde Le Grand Remix)')) as mock_resolve, \
+             patch('src.metadata.enrich_file_metadata', return_value={}), \
+             patch('src.cover_art._find_cover', return_value=None):
+            from src.cover_art import enrich_and_search_cover
+            
+            metadata, cover = enrich_and_search_cover(
+                wav_path,
+                "Let me think about it - Ida Corr Fedde Le Grand (Kefrennnn Remix)",
+                config,
+                wav_path,
+            )
+            
+            self.assertEqual(metadata['artist'], 'Ida Corr')
+            self.assertEqual(metadata['title'], 'Let Me Think About It (Fedde Le Grand Remix)')
+            mock_resolve.assert_called_once()
+
+    def test_enrich_and_search_cover_skips_disambiguation_without_dash(self):
+        """Disambiguation only runs when the filename has ' - ' (two interpretations)."""
+        wav_path = os.path.join(self.test_dir, "test.wav")
+        config = {'metadata': {'enabled': True, 'fallback_to_filename': True}}
+        
+        with patch('src.metadata.extract_metadata', return_value={}), \
+             patch('src.metadata.extract_metadata_from_filename', return_value=('', 'AnteUpPhibesRemix')), \
+             patch('src.metadata.resolve_artist_title_online') as mock_resolve, \
+             patch('src.metadata.enrich_file_metadata', return_value={}), \
+             patch('src.cover_art._find_cover', return_value=None):
+            from src.cover_art import enrich_and_search_cover
+            
+            metadata, cover = enrich_and_search_cover(wav_path, "AnteUpPhibesRemix", config, wav_path)
+            
+            mock_resolve.assert_not_called()
+
+
+class TestResolveArtistTitleOnline(unittest.TestCase):
+    """Tests for disambiguating 'Title - Artist' filename ordering via online sources."""
+
+    def test_reversed_filename_uses_reversed_ordering(self):
+        """Both query orderings return the canonical track; reversed ordering must win."""
+        from src.metadata import resolve_artist_title_online
+        canonical = ('Ida Corr', 'Let Me Think About It (Fedde Le Grand Remix)')
+        with patch('src.metadata.lookup_online_metadata', side_effect=[canonical, canonical]):
+            artist, title = resolve_artist_title_online(
+                "Let me think about it", "Ida Corr Fedde Le Grand (Kefrennnn Remix)", {}
+            )
+        self.assertEqual(artist, 'Ida Corr')
+        self.assertEqual(title, 'Let Me Think About It (Fedde Le Grand Remix)')
+
+    def test_standard_filename_keeps_artist_first(self):
+        """Normal 'Artist - Title' filenames keep artist first on a tie."""
+        from src.metadata import resolve_artist_title_online
+        canonical = ('TyriqueOrDie', 'Get Some (Extended)')
+        with patch('src.metadata.lookup_online_metadata', side_effect=[canonical, canonical]):
+            artist, title = resolve_artist_title_online("TyriqueOrDie", "Get Some (Extended)", {})
+        self.assertEqual(artist, 'TyriqueOrDie')
+        self.assertEqual(title, 'Get Some (Extended)')
+
+    def test_falls_back_when_no_online_match(self):
+        """Input is returned unchanged when no source matches."""
+        from src.metadata import resolve_artist_title_online
+        with patch('src.metadata.lookup_online_metadata', side_effect=[(None, None), (None, None)]):
+            artist, title = resolve_artist_title_online("Foo", "Bar", {})
+        self.assertEqual((artist, title), ("Foo", "Bar"))
+
+    def test_empty_input_unchanged(self):
+        """Empty artist/title pass through without lookups."""
+        from src.metadata import resolve_artist_title_online
+        with patch('src.metadata.lookup_online_metadata') as mock_lookup:
+            artist, title = resolve_artist_title_online("", "Bar", {})
+            self.assertEqual((artist, title), ("", "Bar"))
+            mock_lookup.assert_not_called()
+
 
 class TestURLValidation(unittest.TestCase):
     """Tests for URL validation security."""
@@ -2082,3 +2161,78 @@ class TestRunCmdTimeout(unittest.TestCase):
         success, stdout, stderr = run_cmd('test cmd', timeout=5)
         self.assertFalse(success)
         self.assertIn('timed out', stderr)
+
+
+class TestShellEscaping(unittest.TestCase):
+    """Shell special characters in file paths must be quoted in shell=True commands."""
+
+    SPECIAL_COVER = "Mura Masa - Love$ick (Idle Days Bootleg) [v3.4].jpg"
+
+    def test_embed_cover_quotes_special_char_paths(self):
+        """embed_cover must shell-quote paths containing $ (not double-quote them)."""
+        from src.audio_processing import embed_cover
+
+        with patch('src.audio_processing.run_cmd') as mock_run_cmd:
+            mock_run_cmd.return_value = (True, "", "")
+            result = embed_cover(
+                "/tmp/in.m4a", self.SPECIAL_COVER, "/tmp/out.m4a", "m4a"
+            )
+            cmd = mock_run_cmd.call_args[0][0]
+
+        self.assertTrue(result)
+        self.assertIn(shlex.quote(self.SPECIAL_COVER), cmd)
+        self.assertNotIn(f'"{self.SPECIAL_COVER}"', cmd)
+
+    def test_encode_audio_quotes_metadata_values(self):
+        """Metadata values with special chars must not be shell-expanded."""
+        from src.audio_processing import encode_audio
+        metadata = {"artist": "Love$ick $HOME", "title": 'say "hi" & bye'}
+
+        with patch('src.audio_processing.run_cmd') as mock_run_cmd:
+            mock_run_cmd.return_value = (True, "", "")
+            result = encode_audio(
+                "/tmp/a b.wav", "/tmp/out $ x.m4a", metadata, -0.1, "m4a"
+            )
+            cmd = mock_run_cmd.call_args[0][0]
+
+        self.assertTrue(result)
+        self.assertIn(shlex.quote("Love$ick $HOME"), cmd)
+        self.assertIn(shlex.quote('say "hi" & bye'), cmd)
+        self.assertIn(shlex.quote("/tmp/out $ x.m4a"), cmd)
+
+    def test_extract_metadata_quotes_wav_path(self):
+        """extract_metadata must shell-quote the wav path."""
+        from src.metadata import extract_metadata
+        wav_path = "/tmp/test $dir/weird&file.wav"
+
+        with patch('src.metadata.run_cmd') as mock_run_cmd:
+            mock_run_cmd.return_value = (True, '{"format": {}}', "")
+            extract_metadata(wav_path)
+            cmd = mock_run_cmd.call_args[0][0]
+
+        self.assertIn(shlex.quote(wav_path), cmd)
+        self.assertNotIn(f'"{wav_path}"', cmd)
+
+    def test_download_cover_quotes_url(self):
+        """URLs with & must not be treated as shell operators."""
+        from src.audio_processing import download_cover
+        url = "https://example.com/art.jpg?x=1&y=2"
+
+        with patch('src.audio_processing.run_cmd') as mock_run_cmd, \
+             patch('src.audio_processing.Path.exists', return_value=True):
+            mock_run_cmd.return_value = (True, "", "")
+            result = download_cover(url, "/tmp/cover.jpg")
+            cmd = mock_run_cmd.call_args[0][0]
+
+        self.assertTrue(result)
+        self.assertIn(shlex.quote(url), cmd)
+
+    def test_shq_helper(self):
+        """shq uses shlex.quote semantics."""
+        from src.utils import shq
+        self.assertEqual(shq("a b"), "'a b'")
+        self.assertEqual(shq("a$b"), "'a$b'")
+        self.assertEqual(shq(""), "''")
+        self.assertEqual(shq(None), "''")
+        self.assertIn("$ick", shq("Love$ick"))
+        self.assertEqual(shq("$HOME"), "'$HOME'")

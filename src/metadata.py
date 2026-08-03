@@ -14,6 +14,7 @@ from src.utils import (
     ITUNES_SEARCH_URL,
     MUSICBRAINZ_LOOKUP_URL,
     run_cmd as util_run_cmd,
+    shq,
     to_ascii_filename,
     load_config
 )
@@ -89,7 +90,7 @@ def _find_best_match(search_terms: list, candidates: list, threshold: float = 0.
 
 def extract_metadata(wav_path: str) -> Dict[str, Any]:
     """Extract metadata from WAV file using ffprobe."""
-    cmd = f'ffprobe -v quiet -print_format json -show_format -show_streams "{wav_path}"'
+    cmd = f'ffprobe -v quiet -print_format json -show_format -show_streams {shq(wav_path)}'
     success, stdout, stderr = run_cmd(cmd)
     
     if not success:
@@ -374,6 +375,54 @@ def extract_metadata_from_filename(filename: str) -> Tuple[str, str]:
     
     # Fallback: just use the whole name as title
     return '', name.strip()
+
+
+def _word_containment(needle: str, haystack: str) -> float:
+    """Fraction of needle's words present in haystack (0.0-1.0)."""
+    import re
+    needle_words = set(re.findall(r'\w+', (needle or '').lower()))
+    haystack_words = set(re.findall(r'\w+', (haystack or '').lower()))
+    if not needle_words:
+        return 0.0
+    return len(needle_words & haystack_words) / len(needle_words)
+
+
+def resolve_artist_title_online(artist: str, title: str, config: Optional[Dict[str, Any]] = None) -> Tuple[str, str]:
+    """Verify the Artist/Title ordering of a filename-derived pair against online sources.
+
+    Some filenames use "Title - Artist" instead of "Artist - Title" (e.g.
+    "Let me think about it - Ida Corr Fedde Le Grand (Kefrennnn Remix)"). For each
+    plausible ordering, query the configured metadata sources; keep the online result
+    whose artist and title best match the filename parts.
+
+    Returns the canonical (artist, title) from the best-matching source, or the input
+    unchanged when no source returns a confident match.
+    """
+    if not artist or not title:
+        return artist, title
+
+    candidates = [(artist.strip(), title.strip())]
+    reversed_candidate = (title.strip(), artist.strip())
+    if reversed_candidate not in candidates:
+        candidates.append(reversed_candidate)
+
+    best_score = 0.0
+    best = None
+    for cand_artist, cand_title in candidates:
+        online_artist, online_title = lookup_online_metadata(f"{cand_artist} {cand_title}")
+        if not online_artist or not online_title:
+            continue
+        score = max(
+            _word_containment(online_artist, cand_artist) + _word_containment(online_title, cand_title),
+            _word_containment(online_artist, cand_title) + _word_containment(online_title, cand_artist),
+        )
+        if score > best_score:
+            best_score = score
+            best = (online_artist, online_title)
+
+    if best and best_score >= 1.0:
+        return best
+    return artist, title
 
 
 def _is_valid_artist_handle(potential_artist: str, descriptive_terms: set) -> bool:

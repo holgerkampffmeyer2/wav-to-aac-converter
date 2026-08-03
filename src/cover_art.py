@@ -21,6 +21,7 @@ from src.utils import (
     fetch_url,
     clean_title_for_search,
     load_config,
+    shq,
     search_soundcloud_api,
     try_soundcloud_api_result,
 )
@@ -259,6 +260,18 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
                 metadata['title'] = title
             logger.info(f"  Metadata from filename: {artist} - {title}")
     
+    # Filenames may use "Title - Artist" instead of "Artist - Title". When relying on
+    # filename parsing, verify the ordering against online metadata sources.
+    if (metadata_enabled and not offline and fallback_to_filename
+            and artist and title and ' - ' in (filename or Path(wav_path).stem)):
+        from .metadata import resolve_artist_title_online
+        resolved_artist, resolved_title = resolve_artist_title_online(artist, title, config)
+        if (resolved_artist, resolved_title) != (artist, title):
+            artist, title = resolved_artist, resolved_title
+            metadata['artist'] = artist
+            metadata['title'] = title
+            logger.info(f"  Online metadata (disambiguated): {artist} - {title}")
+    
     if metadata_enabled and artist and title:
         enriched = enrich_file_metadata(wav_path, artist, title, config, current_metadata)
         if enriched:
@@ -315,7 +328,7 @@ def _find_cover(wav_path: str, artist: str, title: str, original_wav_path: str =
     file_hash = hash(wav_path) % 1000000
     temp_cover = f'/tmp/cover_{file_hash}.jpg'
     
-    cmd = f'ffmpeg -y -i "{wav_path}" -map 0:v -map -0:a -c:v copy "{temp_cover}" 2>/dev/null'
+    cmd = f'ffmpeg -y -i {shq(wav_path)} -map 0:v -map -0:a -c:v copy {shq(temp_cover)} 2>/dev/null'
     success, _, _ = audio_run_cmd(cmd)
     if success and Path(temp_cover).exists():
         logger.info(f"  Cover: Extracted from source")

@@ -2,6 +2,7 @@
 """Utility functions, constants, and helper code for wav-to-aac-converter."""
 
 import re
+import shlex
 import logging
 import subprocess
 from pathlib import Path
@@ -88,6 +89,15 @@ class CoverSearchError(Exception):
 class EncodingError(Exception):
     """Audio encoding failures."""
     pass
+
+
+def shq(s: str) -> str:
+    """Shell-quote a string so it is safe to interpolate into shell=True commands.
+
+    Protects filenames, metadata values, and URLs containing special characters
+    (e.g. $, backticks, quotes) from being interpreted by the shell.
+    """
+    return shlex.quote(str(s) if s is not None else "")
 
 
 def run_cmd(cmd: str, capture_output: bool = True, timeout: int = ENCODE_TIMEOUT) -> Tuple[bool, str, str]:
@@ -394,7 +404,7 @@ def fetch_url(url: str, timeout: int = DEFAULT_TIMEOUT, headers: Optional[Dict[s
             form_data.extend(['-d', f'{key}={escaped_value}'])
         curl_cmd.extend(form_data)
     
-    curl_cmd.append(f'"{url}"')
+    curl_cmd.append(shq(url))
     
     success, stdout, _ = run_cmd(' '.join(curl_cmd), timeout=timeout + 5)
     return stdout if success else ""
