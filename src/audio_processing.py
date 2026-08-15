@@ -83,10 +83,13 @@ def embed_cover(input_path: str, cover_path: str, final_path: str, fmt: str) -> 
     return success
 
 
+MIN_SUBSTRING_LENGTH = 3
+
+
 def find_local_cover(wav_path: str) -> Optional[str]:
     """Find cover art in local folder with fuzzy matching.
 
-    Priority: cover.png/jpg -> exact filename -> fuzzy match
+    Priority: cover.png/jpg -> exact filename -> normalized match -> substring match
     """
     from pathlib import Path
     import re
@@ -112,7 +115,16 @@ def find_local_cover(wav_path: str) -> Optional[str]:
             if normalize(img.stem) == normalized:
                 return str(img)
 
-    return None
+    best_cover = None
+    best_len = -1
+    for ext in ('.png', '.jpg', '.jpeg'):
+        for img in wav_dir.glob(f"*{ext}"):
+            norm = normalize(img.stem)
+            if len(norm) >= MIN_SUBSTRING_LENGTH and norm in normalized and len(norm) > best_len:
+                best_cover = str(img)
+                best_len = len(norm)
+
+    return best_cover
 
 
 def download_cover(url: str, output_path: str) -> bool:

@@ -272,6 +272,44 @@ class TestLocalCoverSearch(unittest.TestCase):
         result = find_local_cover(str(wav_path))
         self.assertEqual(result, str(exact_cover))
 
+    def test_substring_match(self):
+        """Find cover whose normalized name is a substring of the WAV name."""
+        wav_path = Path(self.test_dir) / "DJ Hulk - Mix194 - Afrohouse.wav"
+        cover_path = Path(self.test_dir) / "Mix194.png"
+        cover_path.touch()
+        wav_path.touch()
+        result = find_local_cover(str(wav_path))
+        self.assertEqual(result, str(cover_path))
+
+    def test_substring_match_ignores_separators(self):
+        """Substring match works across underscore/hyphen/space differences."""
+        wav_path = Path(self.test_dir) / "Artist - Mix 194 - Title.wav"
+        cover_path = Path(self.test_dir) / "Mix-194.jpg"
+        cover_path.touch()
+        wav_path.touch()
+        result = find_local_cover(str(wav_path))
+        self.assertEqual(result, str(cover_path))
+
+    def test_substring_picks_longest_match(self):
+        """Longest substring match wins when multiple covers match."""
+        wav_path = Path(self.test_dir) / "DJ Hulk - Mix194 - Afrohouse.wav"
+        shorter_cover = Path(self.test_dir) / "Mix19.jpg"
+        longer_cover = Path(self.test_dir) / "Mix194.png"
+        shorter_cover.touch()
+        longer_cover.touch()
+        wav_path.touch()
+        result = find_local_cover(str(wav_path))
+        self.assertEqual(result, str(longer_cover))
+
+    def test_substring_min_length(self):
+        """Very short substrings below minimum length must not match."""
+        wav_path = Path(self.test_dir) / "Song.wav"
+        cover_path = Path(self.test_dir) / "s.png"
+        cover_path.touch()
+        wav_path.touch()
+        result = find_local_cover(str(wav_path))
+        self.assertIsNone(result)
+
 
 class TestEdgeCases(unittest.TestCase):
     """Edge case handling."""

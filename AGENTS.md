@@ -83,7 +83,7 @@ When `metadata.enabled` is true (default), missing tags are written to the WAV f
 
 ### Cover Artwork Strategy
 1. **Source file**: Extract embedded cover from source (WAV/FLAC/AIFF)
-2. **Local folder**: Look for `cover.png`, `cover.jpg`, or exact filename match. No fallback to arbitrary images.
+2. **Local folder**: Look for `cover.png`, `cover.jpg`, exact filename match, or a normalized substring match (e.g. `Mix194.png` matches `DJ Hulk - Mix194 - Afrohouse.wav`; longest match wins, min 3 chars). No fallback to arbitrary images.
 3. **Web search**: Configurable via `metadata.sources` (default: SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz, skipped in `--offline` mode)
 
 SoundCloud cover search uses the **SoundCloud API v2** (via `api-v2.soundcloud.com`) with **confidence scoring**. A `SOUNDCLOUD_CLIENT_ID` must be set in `.env`. Results below `soundcloud_confidence_threshold` (default: 0.6) are rejected and the next source is tried.
@@ -154,7 +154,7 @@ sudo apt install ffmpeg python3
 
 - **Codecs**: MP3 (libmp3lame) or M4A/AAC, 320kbps
 - **Loudness**: True Peak ≤ -0.1 dBTP (auto-calculated gain)
-- **Cover Sources**: Source (embedded) → Local folder (exact match only) → SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz
+- **Cover Sources**: Source (embedded) → Local folder (exact or substring match) → SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz
 - **Retry Logic**: 3 attempts with exponential backoff
 - **Metadata Sources**: Source tags → SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz → filename parsing (order configurable via `metadata.sources`)
 - **Enrichment Tags**: label, genre, album, year, track_number (if metadata enabled)

@@ -218,7 +218,7 @@ sudo apt install ffmpeg python3
 ## Cover Artwork Strategy
 
 1. **Source file**: Extract embedded cover from source (WAV/FLAC/AIFF)
-2. **Local folder**: Look for `cover.png`, `cover.jpg`, or exact filename match. No fallback to arbitrary images in the folder.
+2. **Local folder**: Look for `cover.png`, `cover.jpg`, exact filename match, or a normalized substring match (e.g. `Mix194.png` matches `DJ Hulk - Mix194 - Afrohouse.wav`; longest match wins, min 3 chars). No fallback to arbitrary images in the folder.
 3. **Online search**: Configurable order via `metadata.sources` (default: SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz, skipped in `--offline` mode)
 
 ## Metadata Strategy
