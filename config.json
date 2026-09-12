@@ -13,6 +13,7 @@
     "sources": ["soundcloud", "itunes", "deezer", "bandcamp", "musicbrainz"],
     "fallback_to_filename": true,
     "enrich_tags": ["label", "genre", "album", "year", "track_number"],
-    "label_source_tag": "label"
+    "label_source_tag": "label",
+    "soundcloud_pages": 2
   }
 }

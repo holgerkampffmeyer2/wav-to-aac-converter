@@ -119,6 +119,8 @@ _itunes_cache = {}
 
 def _lookup_itunes(term: str):
     """Lookup track on iTunes Search API with fuzzy matching."""
+    from .utils import strip_all_bracketed
+    term = strip_all_bracketed(term or '').strip()
     cache_key = term.lower().strip()
     if cache_key in _itunes_cache:
         return _itunes_cache[cache_key]
@@ -188,6 +190,8 @@ def _lookup_itunes(term: str):
 
 def _lookup_musicbrainz(term: str):
     """Lookup track on MusicBrainz API."""
+    from .utils import strip_all_bracketed
+    term = strip_all_bracketed(term or '').strip()
     if not term:
         return None, None
     
@@ -229,6 +233,8 @@ def _lookup_musicbrainz(term: str):
 
 def _lookup_bandcamp(term: str):
     """Lookup track on Bandcamp via web search."""
+    from .utils import strip_all_bracketed
+    term = strip_all_bracketed(term or '').strip()
     if not term:
         return None, None
     
@@ -266,6 +272,8 @@ def _lookup_bandcamp(term: str):
 
 def _lookup_deezer(term: str):
     """Lookup track on Deezer API."""
+    from .utils import strip_all_bracketed
+    term = strip_all_bracketed(term or '').strip()
     if not term:
         return None, None
     
@@ -291,7 +299,12 @@ def _lookup_deezer(term: str):
 
 def _lookup_soundcloud(search_term: str):
     """Lookup track on SoundCloud via API v2 with confidence scoring."""
-    from .utils import search_soundcloud_api, try_soundcloud_api_result, load_config
+    from .utils import (
+        search_soundcloud_api,
+        try_soundcloud_api_result,
+        build_soundcloud_queries,
+        load_config,
+    )
 
     if not search_term:
         return None, None
@@ -300,18 +313,17 @@ def _lookup_soundcloud(search_term: str):
     if not track_name:
         return None, None
 
-    query = f"{artist_name} {track_name}"
-    results = search_soundcloud_api(query)
-    if not results:
-        logger.debug(f"  SoundCloud: no API results for '{artist_name} - {track_name}'")
-        return None, None
-
     config = load_config()
-    for track in results:
-        result = try_soundcloud_api_result(track, artist_name, track_name, config)
-        if result:
-            logger.debug(f"  SoundCloud found: {result['artist']} - {result['title']} (confidence {result['confidence']:.2f})")
-            return result['artist'], result['title']
+    for query in build_soundcloud_queries(artist_name, track_name):
+        results = search_soundcloud_api(query)
+        if not results:
+            logger.debug(f"  SoundCloud: no API results for '{query}'")
+            continue
+        for track in results:
+            result = try_soundcloud_api_result(track, artist_name, track_name, config)
+            if result:
+                logger.debug(f"  SoundCloud found: {result['artist']} - {result['title']} (confidence {result['confidence']:.2f})")
+                return result['artist'], result['title']
 
     return None, None
 

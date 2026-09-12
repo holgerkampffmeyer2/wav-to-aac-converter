@@ -568,7 +568,8 @@ class TestConfigFeatures(unittest.TestCase):
                 "sources": ["soundcloud", "itunes", "deezer", "bandcamp", "musicbrainz"],
                 "fallback_to_filename": True,
                 "enrich_tags": ["label", "genre", "album", "year", "track_number"],
-                "label_source_tag": "label"
+                "label_source_tag": "label",
+                "soundcloud_pages": 2
             }
         }
         
@@ -1588,7 +1589,7 @@ class TestEnrichAndSearchCover(unittest.TestCase):
                 wav_path,
                 "Let me think about it - Ida Corr Fedde Le Grand (Kefrennnn Remix)",
                 config,
-                wav_path,
+                os.path.join(self.test_dir, "Let me think about it - Ida Corr Fedde Le Grand (Kefrennnn Remix).wav"),
             )
             
             self.assertEqual(metadata['artist'], 'Ida Corr')
@@ -2188,6 +2189,304 @@ class TestTrySoundcloudApiResult(unittest.TestCase):
         result = try_soundcloud_api_result(track, 'Artist', 'Song', {'soundcloud_confidence_threshold': 0.6})
         self.assertIsNotNone(result)
         self.assertEqual(result['artist'], '')
+
+
+class TestStripAllBracketed(unittest.TestCase):
+    """Tests for stripping bracket/catalog tokens from search queries."""
+
+    def test_strips_catalog_number(self):
+        """Catalog numbers like [DR016] are removed."""
+        from src.utils import strip_all_bracketed
+        self.assertEqual(strip_all_bracketed('Going Crazy [DR016]'), 'Going Crazy')
+
+    def test_strips_parenthesized_qualifiers(self):
+        """Mix qualifiers in parentheses are removed."""
+        from src.utils import strip_all_bracketed
+        self.assertEqual(strip_all_bracketed('Move Your Body (Ibiza)'), 'Move Your Body')
+
+    def test_keeps_core_title(self):
+        """Plain titles are unchanged."""
+        from src.utils import strip_all_bracketed
+        self.assertEqual(strip_all_bracketed('Move Your Body'), 'Move Your Body')
+
+    def test_strips_remix_and_original_mix(self):
+        """Remix and Original Mix qualifiers are removed."""
+        from src.utils import strip_all_bracketed
+        self.assertEqual(strip_all_bracketed('Get High (Mark Lennon Edit)'), 'Get High')
+        self.assertEqual(strip_all_bracketed('Summer (Original Mix) [SLFREEDL062]'), 'Summer')
+
+    def test_nested_brackets(self):
+        """Nested bracket groups are fully removed."""
+        from src.utils import strip_all_bracketed
+        self.assertEqual(strip_all_bracketed('Track (lets [do] it) Now'), 'Track Now')
+
+    def test_empty(self):
+        """Empty input returns empty string."""
+        from src.utils import strip_all_bracketed
+        self.assertEqual(strip_all_bracketed(''), '')
+        self.assertEqual(strip_all_bracketed('   '), '')
+
+
+class TestBuildSoundcloudQueries(unittest.TestCase):
+    """Tests for SoundCloud candidate query generation."""
+
+    def test_catalog_number_produces_stripped_variants(self):
+        """Catalog-number titles include a bracket-stripped variant."""
+        from src.utils import build_soundcloud_queries
+        queries = build_soundcloud_queries('MAZOS', 'Going Crazy [DR016]')
+        self.assertIn('MAZOS Going Crazy', queries)
+        self.assertIn('Going Crazy', queries)
+
+    def test_first_candidate_matches_previous_behavior(self):
+        """The first candidate keeps the full (cleaned) title with artist."""
+        from src.utils import build_soundcloud_queries
+        queries = build_soundcloud_queries('Artist', 'Song [Radio Edit]')
+        self.assertEqual(queries[0], 'Artist Song')
+
+    def test_deduplicates_queries(self):
+        """Identical candidates are emitted only once."""
+        from src.utils import build_soundcloud_queries
+        queries = build_soundcloud_queries('Artist', 'SingleWord')
+        self.assertEqual(queries, ['Artist SingleWord', 'SingleWord'])
+
+    def test_empty_title(self):
+        """Empty title yields no candidates."""
+        from src.utils import build_soundcloud_queries
+        self.assertEqual(build_soundcloud_queries('Artist', ''), [])
+        self.assertEqual(build_soundcloud_queries('Artist', None), [])
+
+    def test_uses_cleaned_and_stripped_ordering(self):
+        """Cleaned-title query precedes fully-stripped variants."""
+        from src.utils import build_soundcloud_queries
+        queries = build_soundcloud_queries('STO', 'Vibin (Ibiza) [CAT123]')
+        self.assertEqual(queries[0], 'STO Vibin (Ibiza) [CAT123]')
+        self.assertIn('STO Vibin', queries)
+        self.assertTrue(queries.index('STO Vibin (Ibiza) [CAT123]') < queries.index('STO Vibin'))
+
+
+class TestSoundcloudQueryFallback(unittest.TestCase):
+    """Tests that catalog-number queries fall back to stripped variants."""
+
+    TRACK = {'title': 'MAZOS - Going Crazy',
+             'user': {'username': 'DAVIES RECORDS'},
+             'artwork_url': 'https://i1.sndcdn.com/art-large.jpg',
+             'permalink_url': 'https://soundcloud.com/finley-davies-661415373/mazos-going-crazy-dr016'}
+
+    def setUp(self):
+        from src.utils import _soundcloud_track_cache
+        _soundcloud_track_cache.clear()
+
+    def test_lookup_soundcloud_falls_back_to_stripped_query(self):
+        """Bracket-stripped query finds the track when the full query returns nothing."""
+        from src.metadata import _lookup_soundcloud
+        calls = []
+        def fake_search(query):
+            calls.append(query)
+            return [] if '[' in query else [dict(self.TRACK)]
+        with patch('src.utils.search_soundcloud_api', side_effect=fake_search):
+            with patch('src.utils.load_config', return_value={'soundcloud_confidence_threshold': 0.6}):
+                artist, title = _lookup_soundcloud('MAZOS - Going Crazy [DR016]')
+        self.assertEqual(artist, 'DAVIES RECORDS')
+        self.assertEqual(title, 'MAZOS - Going Crazy')
+        self.assertIn('MAZOS Going Crazy', calls)
+
+    def test_search_soundcloud_cover_uses_stripped_variant(self):
+        """Cover search recovers artwork via the stripped-variant query."""
+        from src.cover_art import search_soundcloud_cover
+        def fake_search(query):
+            return [] if '[' in query else [dict(self.TRACK)]
+        with patch('src.cover_art.search_soundcloud_api', side_effect=fake_search):
+            with patch('src.cover_art.load_config', return_value={'soundcloud_confidence_threshold': 0.6}):
+                cover = search_soundcloud_cover('MAZOS', 'Going Crazy [DR016]')
+        self.assertIn('art-t500x500.jpg', cover)
+
+
+class TestSoundcloudTrackCache(unittest.TestCase):
+    """Tests for sharing validated SoundCloud results between metadata and cover."""
+
+    TRACK = {'title': 'MAZOS - Going Crazy',
+             'user': {'username': 'DAVIES RECORDS'},
+             'artwork_url': 'https://i1.sndcdn.com/art-large.jpg',
+             'permalink_url': 'https://soundcloud.com/finley-davies-661415373/mazos-going-crazy-dr016'}
+
+    def setUp(self):
+        from src.utils import _soundcloud_track_cache
+        _soundcloud_track_cache.clear()
+
+    def test_soundcloud_cover_reuses_metadata_result(self):
+        """Cover search reuses the validated result from the metadata lookup."""
+        def fake_search(query):
+            return [] if '[' in query else [dict(self.TRACK)]
+        with patch('src.utils.search_soundcloud_api', side_effect=fake_search):
+            with patch('src.utils.load_config', return_value={'soundcloud_confidence_threshold': 0.6}):
+                from src.metadata import _lookup_soundcloud
+                _lookup_soundcloud('MAZOS - Going Crazy [DR016]')
+        from src.cover_art import search_soundcloud_cover
+        with patch('src.cover_art.search_soundcloud_api', side_effect=AssertionError('should not query again')):
+            cover = search_soundcloud_cover('MAZOS', 'Going Crazy [DR016]')
+        self.assertIn('art-t500x500.jpg', cover)
+
+
+class TestSoundcloudApiPagination(unittest.TestCase):
+    """Tests for SoundCloud pool size and pagination."""
+
+    @patch('src.utils.fetch_url')
+    def test_pagination_merges_and_deduplicates(self, mock_fetch):
+        """Two pages are merged with duplicate tracks removed."""
+        mock_fetch.side_effect = [
+            '{"collection": [{"title": "A", "permalink_url": "u1"}, '
+            '{"title": "B", "permalink_url": "u2"}], '
+            '"next_href": "https://x/next"}',
+            '{"collection": [{"title": "B", "permalink_url": "u2"}, '
+            '{"title": "C", "permalink_url": "u3"}], "next_href": ""}',
+        ]
+        with patch('src.utils.SOUNDCLOUD_CLIENT_ID', 'test-id'):
+            from src.utils import search_soundcloud_api
+            results = search_soundcloud_api('query', pages=2)
+        self.assertEqual([r['title'] for r in results], ['A', 'B', 'C'])
+
+    @patch('src.utils.fetch_url')
+    def test_default_limit_is_20(self, mock_fetch):
+        """Default result pool is larger than the previous 5."""
+        mock_fetch.return_value = '{"collection": []}'
+        with patch('src.utils.SOUNDCLOUD_CLIENT_ID', 'test-id'):
+            with patch('src.utils.load_config', return_value={'metadata': {'soundcloud_pages': 1}}):
+                from src.utils import search_soundcloud_api
+                search_soundcloud_api('q')
+        url = mock_fetch.call_args[0][0]
+        self.assertIn('limit=20', url)
+
+
+class TestSoundcloudUploaderScoring(unittest.TestCase):
+    """Tests for uploader-based confidence boosting."""
+
+    def setUp(self):
+        from src.utils import _soundcloud_track_cache
+        _soundcloud_track_cache.clear()
+
+    def test_uploader_artist_match_boosts_confidence(self):
+        """A result whose uploader matches the artist passes with a title-only hit."""
+        from src.utils import try_soundcloud_api_result
+        config = {'soundcloud_confidence_threshold': 0.6}
+        track_no_uploader = {'title': 'Going Crazy', 'user': {}, 'artwork_url': '', 'permalink_url': 'u1'}
+        self.assertIsNone(try_soundcloud_api_result(track_no_uploader, 'MAZOS', 'Going Crazy [DR016]', config))
+        track_with_uploader = {'title': 'Going Crazy', 'user': {'username': 'MAZOS'}, 'artwork_url': '', 'permalink_url': 'u2'}
+        result = try_soundcloud_api_result(track_with_uploader, 'MAZOS', 'Going Crazy [DR016]', config)
+        self.assertIsNotNone(result)
+        self.assertGreaterEqual(result['confidence'], 0.6)
+
+
+class TestSoundcloudTokenScoring(unittest.TestCase):
+    """Tests for word-token (non-bracket) confidence scoring."""
+
+    def setUp(self):
+        from src.utils import _soundcloud_track_cache
+        _soundcloud_track_cache.clear()
+
+    def test_punctuation_tokens_match(self):
+        """Expected tokens with punctuation match plain found tokens."""
+        from src.utils import calculate_match_confidence
+        result = calculate_match_confidence('Dr. Dre', 'Next Episode', 'Dr Dre - Next Episode')
+        self.assertGreaterEqual(result, 0.95)
+
+    def test_catalog_token_in_found_title_counted(self):
+        """A catalog token present in the found title counts as matched."""
+        from src.utils import calculate_match_confidence
+        result = calculate_match_confidence('MAZOS', 'Going Crazy [DR016]', 'MAZOS - Going Crazy [DR016]')
+        self.assertGreaterEqual(result, 0.95)
+
+
+class TestSplitArtistVariants(unittest.TestCase):
+    """Tests for collaboration-based artist variants."""
+
+    def test_splits_collaborations(self):
+        """Collaborations yield combined + solo-artist variants."""
+        from src.utils import split_artist_variants
+        self.assertEqual(split_artist_variants('A & B'), ['A & B', 'A', 'B'])
+        self.assertEqual(split_artist_variants('X feat. Y'), ['X feat. Y', 'X', 'Y'])
+        self.assertEqual(split_artist_variants('A vs B'), ['A vs B', 'A', 'B'])
+        self.assertEqual(split_artist_variants('Solo'), ['Solo'])
+
+    def test_collab_queries_generated(self):
+        """build_soundcloud_queries includes solo-artist variants."""
+        from src.utils import build_soundcloud_queries
+        queries = build_soundcloud_queries('Inner City & Kevin Saunderson', 'Good Life (Mark Lennon Edit)')
+        self.assertIn('Inner City Good Life', queries)
+        self.assertIn('Kevin Saunderson Good Life', queries)
+        self.assertIn('Good Life', queries)
+
+
+class TestBracketCleaningOtherSources(unittest.TestCase):
+    """Tests that bracket/catalog noise is removed for non-SoundCloud sources."""
+
+    def test_lookup_deezer_cleans_brackets(self):
+        """Deezer lookup queries without the catalog number."""
+        @patch('src.utils.fetch_url')
+        def run(mock_fetch):
+            mock_fetch.return_value = '{"data": [{"artist": {"name": "A"}, "title": "T"}]}'
+            from src.metadata import _lookup_deezer
+            artist, title = _lookup_deezer('MAZOS Going Crazy [DR016]')
+            url = mock_fetch.call_args[0][0]
+            self.assertNotIn('DR016', url)
+            self.assertIn('Going%20Crazy', url)
+        run()
+
+    def test_lookup_musicbrainz_cleans_brackets(self):
+        """MusicBrainz lookup queries without bracket content."""
+        @patch('src.utils.fetch_url')
+        def run(mock_fetch):
+            mock_fetch.return_value = ('{"recordings": [{"title": "T", '
+                                       '"releases": [{"artist-credit": [{"name": "A"}]}]}]}')
+            from src.metadata import _lookup_musicbrainz
+            _lookup_musicbrainz('Album [CAT123] Song')
+            url = mock_fetch.call_args[0][0]
+            self.assertNotIn('CAT123', url)
+        run()
+
+    def test_search_deezer_cover_cleans_brackets(self):
+        """Deezer cover search queries without the catalog number."""
+        @patch('src.cover_art.fetch_url')
+        def run(mock_fetch):
+            mock_fetch.return_value = '{"data": [{"album": {"cover_big": "https://x/c.jpg"}}]}'
+            from src.cover_art import search_deezer_cover
+            cover = search_deezer_cover('Artist', 'Song [DR016]')
+            url = mock_fetch.call_args[0][0]
+            self.assertNotIn('DR016', url)
+            self.assertEqual(cover, 'https://x/c.jpg')
+        run()
+
+
+class TestSearchUsesOriginalFilename(unittest.TestCase):
+    """Tests that online search uses the original (Unicode) filename stem."""
+
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.test_dir)
+
+    def test_original_stem_used_for_parsing(self):
+        """Metadata parsing and search run against the original filename."""
+        wav_path = os.path.join(self.test_dir, "ascii.wav")
+        config = {'metadata': {'enabled': True, 'fallback_to_filename': True, 'offline': True}}
+        captured = []
+        def fake_parse(fname):
+            captured.append(fname)
+            return ('RIØD', 'Track')
+        with patch('src.metadata.extract_metadata', return_value={}), \
+             patch('src.metadata.enrich_file_metadata', return_value={}), \
+             patch('src.cover_art._find_cover', return_value=None):
+            with patch('src.metadata.extract_metadata_from_filename', side_effect=fake_parse):
+                from src.cover_art import enrich_and_search_cover
+                metadata, _ = enrich_and_search_cover(
+                    wav_path,
+                    "RID Track",
+                    config,
+                    os.path.join(self.test_dir, "RIØD - Track.wav"),
+                )
+        self.assertTrue(any('RIØD' in f for f in captured))
+        self.assertEqual(metadata['artist'], 'RIØD')
 
 
 class TestRunCmdTimeout(unittest.TestCase):

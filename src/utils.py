@@ -152,7 +152,8 @@ def load_config() -> Dict[str, Any]:
             "sources": ["soundcloud", "itunes", "deezer", "bandcamp", "musicbrainz"],
             "fallback_to_filename": True,
             "enrich_tags": ["label", "genre", "album", "year", "track_number"],
-            "label_source_tag": "label"
+            "label_source_tag": "label",
+            "soundcloud_pages": 2
         }
     }
     try:
@@ -229,9 +230,107 @@ def clean_title_for_search(title: str) -> str:
     return strip_brackets(title)
 
 
+def strip_all_bracketed(text: str) -> str:
+    """Remove all bracket/parenthesis groups (nested-safe) from text."""
+    if not text:
+        return ""
+    result = text
+    prev = None
+    while prev != result:
+        prev = result
+        result = BRACKET_CLEANUP_RE.sub(' ', result)
+    return ' '.join(result.split())
+
+
+def split_artist_variants(artist: str) -> list:
+    """Return artist variants for collaborations (feat., &, +, vs., x)."""
+    artist = (artist or '').strip()
+    if not artist:
+        return []
+    separators = (r'\s+&\s+', r'\s+\+\s+', r'\s+ft\.?\s+',
+                  r'\s+feat\.?\s+', r'\s+vs\.?\s+', r'\s+x\s+')
+    split = [artist]
+    for sep in separators:
+        if re.search(sep, artist, re.IGNORECASE):
+            split = [p.strip() for p in re.split(sep, artist, flags=re.IGNORECASE) if p.strip()]
+            break
+    parts = [artist]
+    if split != [artist]:
+        parts.extend(split)
+    variants = []
+    for p in parts:
+        if p and p not in variants:
+            variants.append(p)
+    return variants
+
+
+def build_soundcloud_queries(artist: str, title: str) -> list:
+    """Build ordered candidate queries for SoundCloud search.
+
+    SoundCloud's /search/tracks is sensitive to non-title tokens such as catalog
+    numbers ([DR016]) or mix qualifiers: a query containing them returns no
+    results even when the track exists. Each candidate strips those tokens from
+    the query; confidence scoring still runs against the full expected values.
+    """
+    artist = (artist or '').strip()
+    title = (title or '').strip()
+    if not title:
+        return []
+
+    cleaned = clean_title_for_search(title)
+    stripped = strip_all_bracketed(title)
+    words = stripped.split()
+    prefix = ' '.join(words[:2])
+
+    variants = [cleaned, stripped]
+    if prefix and prefix not in variants:
+        variants.append(prefix)
+
+    candidates = []
+    seen = set()
+    for variant in variants:
+        if not variant:
+            continue
+        queries = []
+        for artist_variant in split_artist_variants(artist):
+            query = f"{artist_variant} {variant}".strip()
+            if query:
+                queries.append(query)
+        queries.append(variant)
+        for query in queries:
+            key = query.lower()
+            if key not in seen:
+                seen.add(key)
+                candidates.append(query)
+        if len(candidates) >= 8:
+            break
+    return candidates
+
+
+def _token_containment(needle: str, haystack: str) -> float:
+    """Fraction of needle's word tokens present in haystack (0.0-1.0)."""
+    needle_tokens = re.findall(r'\w+', (needle or '').lower())
+    if not needle_tokens:
+        return 0.0
+    haystack_lower = (haystack or '').lower()
+    return sum(1 for t in needle_tokens if t in haystack_lower) / len(needle_tokens)
+
+
+def _soundcloud_confidence(expected_artist: str, expected_title: str,
+                           api_title: str, uploader: str) -> float:
+    """Combine title-based confidence with uploader-artist agreement."""
+    base = calculate_match_confidence(expected_artist, expected_title, api_title)
+    if not expected_artist or not uploader:
+        return base
+    uploader_conf = _token_containment(expected_artist, uploader)
+    if uploader_conf >= 0.5:
+        return max(base, (base + uploader_conf) / 2)
+    return base
+
+
 def calculate_match_confidence(expected_artist: str, expected_title: str, found_track_title: str) -> float:
     """Calculate confidence (0.0–1.0) that found_track_title matches expected artist/title.
-    
+
     Uses word-level containment for multi-word names (e.g. "Emmanuel Callejas Erick Cz"
     appears in "Emmanuel Callejas, Erick Cz - The Rub 212 [SLFREEDL062]") and falls
     back to SequenceMatcher fuzzy ratio for single-word or partial matches.
@@ -242,6 +341,7 @@ def calculate_match_confidence(expected_artist: str, expected_title: str, found_
         return 0.0
 
     found_lower = found_track_title.lower()
+    found_tokens = set(re.findall(r'\w+', found_lower))
     expected_artist = (expected_artist or '').strip()
     expected_title = (expected_title or '').strip()
 
@@ -249,12 +349,13 @@ def calculate_match_confidence(expected_artist: str, expected_title: str, found_
         if not expected:
             return 1.0
         expected_lower = expected.lower()
-        words = expected_lower.split()
+        words = re.findall(r'\w+', expected_lower)
         if len(words) >= 2:
-            matches = sum(1 for w in words if w in found_lower)
+            matches = sum(1 for w in words if w in found_tokens)
             word_score = matches / len(words)
         else:
-            word_score = 1.0 if expected_lower in found_lower else 0.0
+            token = words[0] if words else expected_lower
+            word_score = 1.0 if (token in found_tokens or expected_lower in found_lower) else 0.0
         fuzzy = SequenceMatcher(None, expected_lower, found_lower).ratio()
         return max(word_score, fuzzy)
 
@@ -305,7 +406,25 @@ def validate_soundcloud_client_id() -> bool:
     )
     return False
 
-def search_soundcloud_api(query: str, limit: int = 5) -> list:
+_soundcloud_track_cache: Dict[Any, Any] = {}
+
+
+def _soundcloud_cache_key(artist: str, title: str):
+    """Normalized cache key for a validated SoundCloud result."""
+    return ((artist or '').strip().lower(), (title or '').strip().lower())
+
+
+def get_soundcloud_result_cached(artist: str, title: str) -> Optional[Dict[str, Any]]:
+    """Return a previously-validated SoundCloud result for artist/title, if any."""
+    return _soundcloud_track_cache.get(_soundcloud_cache_key(artist, title))
+
+
+def cache_soundcloud_result(artist: str, title: str, result: Dict[str, Any]) -> None:
+    """Cache a validated SoundCloud track result for reuse."""
+    _soundcloud_track_cache[_soundcloud_cache_key(artist, title)] = result
+
+
+def search_soundcloud_api(query: str, limit: int = 20, pages: Optional[int] = None) -> list:
     """Search SoundCloud via API v2. Returns list of track result dicts."""
     import json
     from urllib.parse import quote
@@ -314,17 +433,32 @@ def search_soundcloud_api(query: str, limit: int = 5) -> list:
         logger.warning("No SOUNDCLOUD_CLIENT_ID in .env — SoundCloud search disabled")
         return []
 
+    if pages is None:
+        pages = load_config().get('metadata', {}).get('soundcloud_pages', 2)
+
     url = (f"https://api-v2.soundcloud.com/search/tracks"
            f"?q={quote(query)}&client_id={SOUNDCLOUD_CLIENT_ID}&limit={limit}")
-    content = fetch_url(url, timeout=SEARCH_TIMEOUT)
-    if not content:
-        return []
-
-    try:
-        data = json.loads(content)
-        return data.get('collection', [])
-    except json.JSONDecodeError:
-        return []
+    tracks = []
+    seen = set()
+    pages_fetched = 0
+    while url and pages_fetched < max(1, pages):
+        content = fetch_url(url, timeout=SEARCH_TIMEOUT)
+        if not content:
+            break
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            break
+        for track in data.get('collection', []):
+            key = track.get('permalink_url') or track.get('id')
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+            tracks.append(track)
+        pages_fetched += 1
+        url = data.get('next_href') or ''
+    return tracks
 
 
 def try_soundcloud_api_result(track: dict, expected_artist: str, expected_title: str,
@@ -344,20 +478,22 @@ def try_soundcloud_api_result(track: dict, expected_artist: str, expected_title:
     if not api_title:
         return None
 
-    confidence = calculate_match_confidence(expected_artist, expected_title, api_title)
+    confidence = _soundcloud_confidence(expected_artist, expected_title, api_title, uploader)
     threshold = config.get('soundcloud_confidence_threshold', 0.6)
 
     if confidence >= threshold:
         # Upgrade artwork to t500x500 for higher resolution
         if artwork and '-large.jpg' in artwork:
             artwork = artwork.replace('-large.jpg', '-t500x500.jpg')
-        return {
+        result = {
             'title': api_title,
             'artist': uploader,
             'thumbnail': artwork,
             'url': permalink,
             'confidence': confidence,
         }
+        cache_soundcloud_result(expected_artist, expected_title, result)
+        return result
 
     logger.debug(f"  SoundCloud API confidence {confidence:.2f} < {threshold}")
     return None

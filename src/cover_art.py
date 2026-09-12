@@ -24,6 +24,9 @@ from src.utils import (
     shq,
     search_soundcloud_api,
     try_soundcloud_api_result,
+    build_soundcloud_queries,
+    get_soundcloud_result_cached,
+    strip_all_bracketed,
 )
 
 logger = logging.getLogger(__name__)
@@ -35,8 +38,13 @@ def search_deezer_cover(artist: str, title: str) -> Optional[str]:
     if not artist and not title:
         return None
     
+    artist = strip_all_bracketed(artist or '').strip()
+    title = strip_all_bracketed(title or '').strip()
+    if not artist and not title:
+        return None
+
     # Try track search first (better for getting actual track cover)
-    query = f"{artist}+{title}".replace(' ', '+')
+    query = f"{artist}+{title}".replace(' ', '+').strip('+')
     url = f"https://api.deezer.com/search/track?q={quote(query)}&limit=5"
     content = fetch_url(url, timeout=SEARCH_TIMEOUT)
     if not content:
@@ -74,7 +82,12 @@ def search_musicbrainz_cover(artist: str, title: str) -> Optional[str]:
     """Search MusicBrainz Cover Art Archive for cover art."""
     if not artist and not title:
         return None
-    
+
+    artist = strip_all_bracketed(artist or '').strip()
+    title = strip_all_bracketed(title or '').strip()
+    if not artist and not title:
+        return None
+
     query = f'artist:"{artist}" AND recording:"{title}"'
     search_url = f"{MUSICBRAINZ_SEARCH_URL}?query={quote(query)}&fmt=json&limit=1"
     content = fetch_url(search_url, timeout=SEARCH_TIMEOUT)
@@ -108,6 +121,12 @@ def search_bandcamp_cover(artist: str, title: str) -> Optional[str]:
     """Search Bandcamp for cover art via web search."""
     if not artist and not title:
         return None
+
+    artist = strip_all_bracketed(artist or '').strip()
+    title = strip_all_bracketed(title or '').strip()
+    if not artist and not title:
+        return None
+
     query = f"{artist} {title}".strip()
     if not query:
         return None
@@ -134,18 +153,20 @@ def search_soundcloud_cover(artist: str, title: str) -> Optional[str]:
     if not artist and not title:
         return None
 
-    query = f"{artist} {title}"
-    results = search_soundcloud_api(query)
-    if not results:
-        return None
+    cached = get_soundcloud_result_cached(artist, title)
+    if cached is not None and cached.get('thumbnail'):
+        return cached['thumbnail']
 
     config = load_config()
-    for track in results:
-        result = try_soundcloud_api_result(track, artist, title, config)
-        if result:
-            logger.info(f"  SoundCloud cover found (confidence {result['confidence']:.2f})")
-            return result['thumbnail']
-
+    for query in build_soundcloud_queries(artist, title):
+        results = search_soundcloud_api(query)
+        if not results:
+            continue
+        for track in results:
+            result = try_soundcloud_api_result(track, artist, title, config)
+            if result:
+                logger.info(f"  SoundCloud cover found (confidence {result['confidence']:.2f})")
+                return result['thumbnail']
     return None
 
 
@@ -219,7 +240,9 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
     metadata_enabled = config.get('metadata', {}).get('enabled', True)
     offline = config.get('metadata', {}).get('offline', False)
     fallback_to_filename = config.get('metadata', {}).get('fallback_to_filename', True)
-    
+
+    search_filename = Path(original_wav_path).stem if original_wav_path else (filename or Path(wav_path).stem)
+
     metadata = {}
     artist = None
     title = None
@@ -231,13 +254,20 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
     title = metadata.get('title', '')
     
     if not (artist and title) and fallback_to_filename:
-        raw_artist, raw_title = extract_metadata_from_filename(filename or Path(wav_path).stem)
-        if not artist:
+        raw_artist, raw_title = extract_metadata_from_filename(search_filename)
+        fname = search_filename
+        if ' - ' in fname:
             artist = raw_artist
-            metadata['artist'] = artist
-        if not title:
             title = raw_title
+            metadata['artist'] = artist
             metadata['title'] = title
+        else:
+            if not artist:
+                artist = raw_artist
+                metadata['artist'] = artist
+            if not title:
+                title = raw_title
+                metadata['title'] = title
     
     search_term = f"{artist} {title}".strip()
     if metadata_enabled and search_term and not (artist and title):
@@ -251,7 +281,7 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
     
     if not artist and not title:
         if fallback_to_filename:
-            raw_artist, raw_title = extract_metadata_from_filename(filename or Path(wav_path).stem)
+            raw_artist, raw_title = extract_metadata_from_filename(search_filename)
             if not artist:
                 artist = raw_artist
                 metadata['artist'] = artist
@@ -263,7 +293,7 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
     # Filenames may use "Title - Artist" instead of "Artist - Title". When relying on
     # filename parsing, verify the ordering against online metadata sources.
     if (metadata_enabled and not offline and fallback_to_filename
-            and artist and title and ' - ' in (filename or Path(wav_path).stem)):
+            and artist and title and ' - ' in search_filename):
         from .metadata import resolve_artist_title_online
         resolved_artist, resolved_title = resolve_artist_title_online(artist, title, config)
         if (resolved_artist, resolved_title) != (artist, title):
