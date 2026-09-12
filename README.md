@@ -2,7 +2,7 @@
 
 ![AI-Powered Audio Conversion](assets/ai-powered.png)
 
-[![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)](https://github.com/holgerkampffmeyer2/wav-to-aac-converter)
+[![Python Version](https://img.shields.io/badge/python-3.12%2B-blue)](https://github.com/holgerkampffmeyer2/wav-to-aac-converter)
 [![License](https://img.shields.io/github/license/holgerkampffmeyer2/wav-to-aac-converter)](https://github.com/holgerkampffmeyer2/wav-to-aac-converter)
 [![Tests](https://github.com/holgerkampffmeyer2/wav-to-aac-converter/actions/workflows/test.yml/badge.svg)](https://github.com/holgerkampffmeyer2/wav-to-aac-converter/actions/workflows/test.yml)
 
@@ -25,7 +25,7 @@ INSTALL_DIR=~/bin curl -fsSL https://raw.githubusercontent.com/holgerkampffmeyer
 
 ### From Source (Experts)
 
-Requires Python 3.9+, ffmpeg, and ffprobe.
+Requires Python 3.12+, ffmpeg, and ffprobe.
 
 ```bash
 git clone https://github.com/holgerkampffmeyer2/wav-to-aac-converter.git
