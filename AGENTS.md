@@ -49,6 +49,11 @@ python3 convert.py --m4a *.flac           # FLAC to M4A
 # Offline mode (no online lookups, local cover only)
 python3 convert.py --offline <file.wav>    # Single file offline
 python3 convert.py --offline *.wav         # Batch offline
+
+# Loudness control
+python3 convert.py --loudness verify <file.wav>   # Measure output, guarantee no clipping
+python3 convert.py --loudness fast <file.wav>     # Single pass + warning when verify is needed
+python3 convert.py --loudness off <file.wav>      # Legacy gain only (no clipping protection)
 ```
 
 ## Output Format Selection
@@ -58,6 +63,9 @@ python3 convert.py --offline *.wav         # Batch offline
 | (default) | MP3 | libmp3lame, 320kbps |
 | `--m4a` | M4A | AAC, 320kbps |
 | `--offline` | Current | No online lookups, local cover only |
+| `--loudness <mode>` | Any | `fast` (default) · `verify` · `off` |
+
+Loudness modes work with any output format and are configured in the `loudness` block of `config.json` (see Technical Details).
 
 ## Workflow Steps
 
@@ -88,7 +96,9 @@ When `metadata.enabled` is true (default), missing tags are written to the WAV f
 
 SoundCloud cover search uses the **SoundCloud API v2** (via `api-v2.soundcloud.com`) with **confidence scoring**. A `SOUNDCLOUD_CLIENT_ID` must be set in `.env`. Results below `soundcloud_confidence_threshold` (default: 0.6) are rejected and the next source is tried.
 
-Note: Cover search stops at first successful match (early exit).
+Remixes: a bracketed remixer in the filename (e.g. `ACTIN' TOUGH (LXRENZ REMIX)`) is extracted as a **hint**. Queries are then built including the uploader handle, and uploader/remix-marker agreement boosts (or penalises) candidates — so the actual remix (usually uploaded by the remixer handle) wins over the plain original release. Without a hint, the previous behavior applies unchanged.
+
+Note: SoundCloud cover search iterates **all** candidate queries and returns the highest-confidence result **that has artwork**; falls back to the next source only if none matches.
 
 ### Batch Processing
 - **Auto-detected**: 4+ files trigger parallel mode
@@ -113,7 +123,7 @@ Note: Cover search stops at first successful match (early exit).
 After conversion, agent should verify:
 
 - [ ] **Correct Codec**: MP3 (`codec_name=mp3`) or M4A (`codec_name=aac`)
-- [ ] **True Peak ≤ -0.1 dBTP**: Check with loudnorm analysis
+- [ ] **True Peak within target**: ≤ `loudness.target_tp` dBTP (default -0.5) when using `--loudness verify`; with `fast` a warning may be emitted if verify is needed
 - [ ] **Cover embedded** (if available): Check stream tags in ffprobe output
 - [ ] **Metadata present**: Artist/Title visible in ffprobe output
 
@@ -153,7 +163,7 @@ sudo apt install ffmpeg python3
 ## Technical Details
 
 - **Codecs**: MP3 (libmp3lame) or M4A/AAC, 320kbps
-- **Loudness**: True Peak ≤ -0.1 dBTP (auto-calculated gain)
+- **Loudness**: `loudness` block in `config.json`. `mode` (`fast` default, `verify`, `off`), `target_tp` (-0.5), `max_retries` (2), `risk_threshold_db` (-2.0), `reserve_aac_db` (2.5), `reserve_mp3_db` (1.5). `fast`: single pass; sources with true peak above the risk threshold get a codec-specific reserve gain, and a warning is logged if a follow-up `verify` run is advised. `verify`: measures the output true peak and re-encodes (up to `max_retries`) until ≤ `target_tp`. `off`: legacy gain only (`min(0, -0.1 - input_tp)`), no clipping protection.
 - **Cover Sources**: Source (embedded) → Local folder (exact or substring match) → SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz
 - **Retry Logic**: 3 attempts with exponential backoff
 - **Metadata Sources**: Source tags → SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz → filename parsing (order configurable via `metadata.sources`)

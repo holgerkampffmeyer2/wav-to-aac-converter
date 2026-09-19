@@ -562,6 +562,14 @@ class TestConfigFeatures(unittest.TestCase):
             "timeout_seconds": 30,
             "fuzzy_threshold": 0.8,
             "soundcloud_confidence_threshold": 0.6,
+            "loudness": {
+                "mode": "fast",
+                "target_tp": -0.5,
+                "max_retries": 2,
+                "risk_threshold_db": -2.0,
+                "reserve_aac_db": 2.5,
+                "reserve_mp3_db": 1.5,
+            },
             "metadata": {
                 "enabled": True,
                 "offline": False,
@@ -1447,6 +1455,7 @@ class TestEmbeddedCoverExtraction(unittest.TestCase):
             mock_run_cmd.return_value = (False, "", "")
             
             with patch('src.audio_processing.find_local_cover', return_value=None), \
+                 patch('src.cover_art.search_soundcloud_cover', return_value=None), \
                  patch('src.cover_art.search_deezer_cover', return_value="https://example.com/cover.jpg"), \
                  patch('src.cover_art.search_musicbrainz_cover', return_value=None), \
                  patch('src.cover_art.search_bandcamp_cover', return_value=None):
@@ -1466,6 +1475,7 @@ class TestEmbeddedCoverExtraction(unittest.TestCase):
             mock_run_cmd.return_value = (False, "", "")
             
             with patch('src.audio_processing.find_local_cover', return_value=None), \
+                 patch('src.cover_art.search_soundcloud_cover', return_value=None), \
                  patch('src.cover_art.search_deezer_cover', return_value=None), \
                  patch('src.cover_art.search_musicbrainz_cover', return_value="https://musicbrainz.com/cover.jpg"), \
                  patch('src.cover_art.search_bandcamp_cover', return_value=None):
@@ -1485,6 +1495,7 @@ class TestEmbeddedCoverExtraction(unittest.TestCase):
             mock_run_cmd.return_value = (False, "", "")
             
             with patch('src.audio_processing.find_local_cover', return_value=None), \
+                 patch('src.cover_art.search_soundcloud_cover', return_value=None), \
                  patch('src.cover_art.search_deezer_cover', return_value=None), \
                  patch('src.cover_art.search_musicbrainz_cover', return_value=None), \
                  patch('src.cover_art.search_bandcamp_cover', return_value=None):
@@ -2573,3 +2584,200 @@ class TestShellEscaping(unittest.TestCase):
         self.assertEqual(shq(None), "''")
         self.assertIn("$ick", shq("Love$ick"))
         self.assertEqual(shq("$HOME"), "'$HOME'")
+
+
+class TestExtractRemixHandle(unittest.TestCase):
+    """Tests for remixer/uploader hint extraction from bracketed markers."""
+
+    def test_extracts_handle(self):
+        """(LXRENZ REMIX) yields LXRENZ."""
+        from src.utils import extract_remix_handle
+        self.assertEqual(extract_remix_handle("ACTIN' TOUGH (LXRENZ REMIX)"), "LXRENZ")
+
+    def test_extracts_multiword_handle(self):
+        """"(Mark Lennon Edit)" yields Mark Lennon."""
+        from src.utils import extract_remix_handle
+        self.assertEqual(extract_remix_handle("Good Life (Mark Lennon Edit)"), "Mark Lennon")
+
+    def test_brackets_and_case_insensitive(self):
+        """Square brackets and lower-case keywords also work."""
+        from src.utils import extract_remix_handle
+        self.assertEqual(extract_remix_handle("[xl bootleg]"), "xl")
+        self.assertEqual(extract_remix_handle("Song (dj mix rework)"), "dj")
+
+    def test_qualifiers_without_handle_return_none(self):
+        """Radio Edit / Extended Mix / Clean have no remixer handle."""
+        from src.utils import extract_remix_handle
+        self.assertIsNone(extract_remix_handle("Song [Radio Edit]"))
+        self.assertIsNone(extract_remix_handle("Song (Extended Mix)"))
+        self.assertIsNone(extract_remix_handle("Song (Clean)"))
+
+    def test_catalog_numbers_return_none(self):
+        """Catalog numbers have no remix keyword."""
+        from src.utils import extract_remix_handle
+        self.assertIsNone(extract_remix_handle("Going Crazy [DR016]"))
+
+    def test_empty_input(self):
+        """Empty input returns None."""
+        from src.utils import extract_remix_handle
+        self.assertIsNone(extract_remix_handle(""))
+        self.assertIsNone(extract_remix_handle(None))
+
+
+class TestBuildSoundcloudQueriesHint(unittest.TestCase):
+    """Tests for remix-hint query variants."""
+
+    def test_hint_adds_uploader_variant(self):
+        """A remixer hint adds a hinted query variant."""
+        from src.utils import build_soundcloud_queries
+        queries = build_soundcloud_queries("", "ACTIN' TOUGH (LXRENZ REMIX)", hint='LXRENZ')
+        self.assertIn("LXRENZ ACTIN' TOUGH", queries)
+
+    def test_no_hint_keeps_previous_candidates(self):
+        """Without a hint, candidate generation is unchanged."""
+        from src.utils import build_soundcloud_queries
+        queries = build_soundcloud_queries("Artist", "Song [DR016]")
+        self.assertEqual(queries[0], "Artist Song [DR016]")
+        self.assertIn("Artist Song", queries)
+        self.assertNotIn("LXRENZ", build_soundcloud_queries("", "ACTIN' TOUGH (LXRENZ REMIX)"))
+
+
+class TestSoundcloudRemixScoring(unittest.TestCase):
+    """Tests for remix/uploader disambiguation in confidence scoring."""
+
+    def setUp(self):
+        from src.utils import _soundcloud_track_cache
+        _soundcloud_track_cache.clear()
+
+    def test_original_release_weighted_below_threshold(self):
+        """The plain original (no remix marker, unrelated uploader) is rejected."""
+        from src.utils import try_soundcloud_api_result
+        config = {'soundcloud_confidence_threshold': 0.6}
+        original = {
+            'title': "Dean Turnley - Actin' Tough",
+            'user': {'username': 'Some Original Channel'},
+            'artwork_url': 'https://i1.sndcdn.com/art-large.jpg',
+        }
+        result = try_soundcloud_api_result(original, '', "ACTIN' TOUGH (LXRENZ REMIX)", config, hint='LXRENZ')
+        self.assertIsNone(result)
+
+    def test_remix_uploader_matched(self):
+        """The true remix (uploader LXRENZ) passes with high confidence."""
+        from src.utils import try_soundcloud_api_result
+        config = {'soundcloud_confidence_threshold': 0.6}
+        remix = {
+            'title': "DEAN TURNLEY - ACTIN' TOUGH (LXRENZ REMIX)",
+            'user': {'username': 'LXRENZ'},
+            'artwork_url': 'https://i1.sndcdn.com/art-large.jpg',
+        }
+        result = try_soundcloud_api_result(remix, '', "ACTIN' TOUGH (LXRENZ REMIX)", config, hint='LXRENZ')
+        self.assertIsNotNone(result)
+        self.assertEqual(result['artist'], 'LXRENZ')
+        self.assertGreaterEqual(result['confidence'], 0.85)
+
+    def test_hint_absent_keeps_legacy_behavior(self):
+        """Files without a remix hint still match as before."""
+        from src.utils import try_soundcloud_api_result
+        config = {'soundcloud_confidence_threshold': 0.6}
+        track = {
+            'title': 'Going Crazy',
+            'user': {'username': 'MAZOS'},
+            'artwork_url': '',
+        }
+        result = try_soundcloud_api_result(track, 'MAZOS', 'Going Crazy [DR016]', config)
+        self.assertIsNotNone(result)
+
+
+class TestSoundcloudRemixLookup(unittest.TestCase):
+    """End-to-end SoundCloud lookup picks the remix, not the original."""
+
+    ORIGINAL = {
+        'title': "Dean Turnley - Actin' Tough",
+        'user': {'username': 'Record Label'},
+        'artwork_url': 'https://i1.sndcdn.com/art-large.jpg',
+        'permalink_url': 'https://soundcloud.com/label/dean-turnley-actin-tough',
+    }
+    REMIX = {
+        'title': "DEAN TURNLEY - ACTIN' TOUGH (LXRENZ REMIX)",
+        'user': {'username': 'LXRENZ'},
+        'artwork_url': 'https://i1.sndcdn.com/art-large.jpg',
+        'permalink_url': 'https://soundcloud.com/lxrenzmusic/dean-turnley-actin-tough',
+    }
+
+    def setUp(self):
+        from src.utils import _soundcloud_track_cache
+        _soundcloud_track_cache.clear()
+
+    def test_lookup_picks_remix(self):
+        """Metadata lookup returns the LXRENZ uploader and remix title."""
+        from src.metadata import _lookup_soundcloud
+
+        def fake_search(query):
+            if 'LXRENZ' in query:
+                return [dict(self.REMIX)]
+            return [dict(self.ORIGINAL), dict(self.REMIX)]
+
+        with patch('src.utils.search_soundcloud_api', side_effect=fake_search):
+            with patch('src.utils.load_config', return_value={'soundcloud_confidence_threshold': 0.6}):
+                artist, title = _lookup_soundcloud("ACTIN' TOUGH (LXRENZ REMIX)")
+
+        self.assertEqual(artist, 'LXRENZ')
+        self.assertIn('LXRENZ REMIX', title)
+
+    def test_cover_picks_remix_artwork(self):
+        """Cover search returns the remix track's artwork when both exist."""
+        from src.cover_art import search_soundcloud_cover
+
+        def fake_search(query):
+            if 'LXRENZ' in query:
+                return [dict(self.REMIX)]
+            return [dict(self.ORIGINAL), dict(self.REMIX)]
+
+        with patch('src.cover_art.search_soundcloud_api', side_effect=fake_search):
+            with patch('src.cover_art.load_config', return_value={'soundcloud_confidence_threshold': 0.6}):
+                cover = search_soundcloud_cover('LXRENZ', "DEAN TURNLEY - ACTIN' TOUGH (LXRENZ REMIX)")
+
+        self.assertEqual(cover, 'https://i1.sndcdn.com/art-t500x500.jpg')
+
+
+class TestComputeLoudnessGain(unittest.TestCase):
+    """Tests for gain/risk logic used by fast/verify/off loudness modes."""
+
+    CONFIG = {
+        'loudness': {
+            'mode': 'fast',
+            'target_tp': -0.5,
+            'max_retries': 2,
+            'risk_threshold_db': -2.0,
+            'reserve_aac_db': 2.5,
+            'reserve_mp3_db': 1.5,
+        }
+    }
+
+    def test_safe_source_no_extra_gain(self):
+        """Sources well below threshold keep the legacy gain (no reserve)."""
+        from src.convert import compute_loudness_gain
+        gain, risk = compute_loudness_gain(-5.0, 'm4a', dict(self.CONFIG), 'fast')
+        self.assertFalse(risk)
+        self.assertAlmostEqual(gain, 0.0, places=3)
+
+    def test_risky_source_fast_uses_reserve(self):
+        """Risky sources get a per-codec reserve in fast mode."""
+        from src.convert import compute_loudness_gain
+        gain, risk = compute_loudness_gain(-0.5, 'm4a', dict(self.CONFIG), 'fast')
+        self.assertTrue(risk)
+        self.assertAlmostEqual(gain, -2.5, places=3)
+
+    def test_risky_source_verify_keeps_legacy_gain(self):
+        """verify mode corrects via measurement, not a reserve."""
+        from src.convert import compute_loudness_gain
+        gain, risk = compute_loudness_gain(0.26, 'm4a', dict(self.CONFIG), 'verify')
+        self.assertTrue(risk)
+        self.assertAlmostEqual(gain, -0.36, places=3)
+
+    def test_off_mode_keeps_legacy_gain(self):
+        """off mode never applies a reserve (gain is capped at 0)."""
+        from src.convert import compute_loudness_gain
+        gain, risk = compute_loudness_gain(-0.5, 'mp3', dict(self.CONFIG), 'off')
+        self.assertTrue(risk)
+        self.assertAlmostEqual(gain, 0.0, places=3)

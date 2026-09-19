@@ -33,6 +33,7 @@ from .utils import (
 
 from .audio_processing import (
     analyze_loudness,
+    measure_output_true_peak,
     encode_audio,
     process_cover,
     embed_cover as audio_embed_cover,
@@ -57,7 +58,7 @@ from .cover_art import (
 )
 
 
-def save_result_json(wav_path: str, metadata: Dict[str, Any], loudness: Optional[Dict[str, Any]], output_name: str, success: bool, has_cover: bool = False, fmt: str = 'mp3'):
+def save_result_json(wav_path: str, metadata: Dict[str, Any], loudness: Optional[Dict[str, Any]], output_name: str, success: bool, has_cover: bool = False, fmt: str = 'mp3', warning: str = ''):
     """Save conversion result to JSON."""
     import json
     from pathlib import Path
@@ -72,6 +73,8 @@ def save_result_json(wav_path: str, metadata: Dict[str, Any], loudness: Optional
     }
     if loudness:
         result["loudness"] = loudness
+    if warning:
+        result["warning"] = warning
     
     json_path = Path(output_name).with_suffix('.json')
     with open(json_path, 'w') as f:
@@ -102,6 +105,29 @@ def verify_output(output_path: str, fmt: str) -> Tuple[bool, Dict[str, bool]]:
     has_cover = 'attached_pic=1' in stdout or 'Stream' in stdout and 'Video' in stdout
     
     return codec_ok, {"mp3": is_mp3, "m4a": is_m4a, "cover": has_cover}
+
+def compute_loudness_gain(input_tp: float, fmt: str, config: Dict[str, Any],
+                          mode: Optional[str] = None) -> Tuple[float, bool]:
+    """Compute the volume gain (dB) and clipping-risk flag from the source true peak.
+
+    Returns ``(gain_db, risk)``:
+    - ``risk`` is True when the source true peak sits above ``risk_threshold_db``
+      (near/over 0 dBFS), i.e. lossy codecs may overshoot the output peak.
+    - In ``fast`` mode a per-codec reserve gain is subtracted on the risky path
+      (no guarantee) so a warning can be emitted instead of silent clipping.
+    - ``verify``/``off`` modes keep the legacy ``input_tp``-based gain; verify
+      additionally corrects the output in a measure loop.
+    """
+    loudness_cfg = config.get('loudness', {}) or {}
+    actual_mode = mode or config.get('loudness_mode') or loudness_cfg.get('mode', 'fast')
+    risk_threshold = float(loudness_cfg.get('risk_threshold_db', -2.0))
+    reserve_key = 'reserve_aac_db' if fmt == 'm4a' else 'reserve_mp3_db'
+    reserve = float(loudness_cfg.get(reserve_key, 0.0))
+
+    risk = input_tp > risk_threshold
+    base_gain = min(0, -0.1 - input_tp)
+    gain_db = (base_gain - reserve) if (actual_mode == 'fast' and risk) else base_gain
+    return gain_db, risk
 
 
 def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True, config: Dict[str, Any] = None) -> Tuple[bool, Optional[str]]:
@@ -139,8 +165,14 @@ def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True, conf
             return False, None
         logger.info(f"  Loudness: {loudness.get('input_i', 'N/A')} LUFS, True Peak: {loudness.get('input_tp', 'N/A')} dB")
         
+        target_tp = float((config.get('loudness', {}) or {}).get('target_tp', -0.5))
+        max_retries = int((config.get('loudness', {}) or {}).get('max_retries', 2))
+
         input_tp = float(loudness.get('input_tp', -10))
-        gain_db = min(0, -0.1 - input_tp)
+        loudness_mode = config.get('loudness_mode') or (config.get('loudness', {}) or {}).get('mode', 'fast')
+        gain_db, risk = compute_loudness_gain(input_tp, fmt, config, loudness_mode)
+        if risk:
+            logger.info(f"  Loudness mode: {loudness_mode} (Risiko: Quell-TP {input_tp:.2f} dBTP über Schwelle)")
         
         metadata, cover_source = enrich_and_search_cover(wav_path, base_name, config, original_wav_path)
         
@@ -152,6 +184,21 @@ def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True, conf
         metadata = {k: v for k, v in metadata.items() if isinstance(v, str)}
         
         success = encode_audio(wav_path, temp_output, metadata, gain_db, fmt)
+        
+        if success and loudness_mode == 'verify':
+            measured_tp = None
+            for _attempt in range(max_retries + 1):
+                measured_tp = measure_output_true_peak(temp_output)
+                if measured_tp is None or measured_tp <= target_tp:
+                    break
+                adjust = target_tp - measured_tp
+                gain_db = gain_db + adjust
+                logger.info(f"  Verify: Ausgabe-TP {measured_tp:.2f} dBTP > Ziel {target_tp} dBTP, korrigiere Gain um {adjust:.2f} dB → {gain_db:.2f} dB")
+                success = encode_audio(wav_path, temp_output, metadata, gain_db, fmt)
+                if not success:
+                    break
+            if success and measured_tp is not None and measured_tp > target_tp:
+                logger.warning(f"  ⚠ Ausgabe true peak rel. {measured_tp:.2f} dBTP konnte auch nach {max_retries} Korrektur(en) nicht unter {target_tp} dBTP gebracht werden")
         
         if not success:
             logger.error(f"  Encoding failed")
@@ -203,6 +250,14 @@ def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True, conf
         info = result if isinstance(result, dict) else {}
         if valid:
             logger.info(f"  SUCCESS: {output_name} ({fmt.upper()}: {info.get(fmt)}, Cover: {info.get('cover')})")
+            if risk and loudness_mode != 'verify':
+                measured_tp = measure_output_true_peak(output_name)
+                if measured_tp is not None and measured_tp > target_tp:
+                    logger.warning(
+                        f"  ⚠ Ausgabe true peak: {measured_tp:.2f} dBTP > Ziel {target_tp} dBTP "
+                        f"(Quell-TP {input_tp:.2f} dBTP) — Quelle liegt nahe/über 0 dBFS und überschwingt "
+                        f"im {fmt.upper()}-Codec; für garantierten Peak: --loudness verify"
+                    )
             if temp_dir and Path(temp_dir).exists():
                 shutil.rmtree(temp_dir, ignore_errors=True)
             return True, output_name
@@ -264,6 +319,8 @@ def parse_args():
     parser.add_argument('--max-workers', type=int, default=config.get('max_parallel_processes', 5), help='Max parallel processes')
     parser.add_argument('--no-cover', action='store_false', default=config.get('embed_cover', True), dest='embed_cover', help='Disable cover art embedding')
     parser.add_argument('--no-loudnorm', action='store_false', default=config.get('loudnorm', True), dest='loudnorm', help='Disable loudness normalization')
+    parser.add_argument('--loudness', choices=['fast', 'verify', 'off'], default=config.get('loudness', {}).get('mode', 'fast'),
+                        help='Loudness mode: fast (single-pass + warning when verify is needed), verify (checks and corrects output true peak), off (legacy input_tp gain only)')
     parser.add_argument('--retry-attempts', type=int, default=config.get('retry_attempts', 3), help='Retry attempts')
     parser.add_argument('--timeout', type=int, default=config.get('timeout_seconds', 30), help='Timeout in seconds')
     
@@ -288,6 +345,9 @@ def main():
     if args.offline:
         config['metadata']['enabled'] = False
         config['metadata']['offline'] = True
+    if 'loudness' not in config:
+        config['loudness'] = {}
+    config['loudness_mode'] = 'off' if not args.loudnorm else args.loudness
     
     if not args.offline and config['metadata'].get('enabled', True):
         validate_soundcloud_client_id()

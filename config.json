@@ -7,6 +7,14 @@
   "timeout_seconds": 30,
   "fuzzy_threshold": 0.8,
   "soundcloud_confidence_threshold": 0.6,
+  "loudness": {
+    "mode": "fast",
+    "target_tp": -0.5,
+    "max_retries": 2,
+    "risk_threshold_db": -2.0,
+    "reserve_aac_db": 2.5,
+    "reserve_mp3_db": 1.5
+  },
   "metadata": {
     "enabled": true,
     "offline": false,

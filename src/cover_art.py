@@ -26,6 +26,7 @@ from src.utils import (
     try_soundcloud_api_result,
     build_soundcloud_queries,
     get_soundcloud_result_cached,
+    extract_remix_handle,
     strip_all_bracketed,
 )
 
@@ -149,7 +150,12 @@ def search_bandcamp_cover(artist: str, title: str) -> Optional[str]:
 
 
 def search_soundcloud_cover(artist: str, title: str) -> Optional[str]:
-    """Search SoundCloud for cover art via API v2 with confidence scoring."""
+    """Search SoundCloud for cover art via API v2 with confidence scoring.
+
+    Iterates all queries and returns the artwork of the highest-confidence
+    validated result. A remixer/uploader hint from the title disambiguates
+    remixes from plain original releases.
+    """
     if not artist and not title:
         return None
 
@@ -158,15 +164,21 @@ def search_soundcloud_cover(artist: str, title: str) -> Optional[str]:
         return cached['thumbnail']
 
     config = load_config()
-    for query in build_soundcloud_queries(artist, title):
+    hint = extract_remix_handle(title) or extract_remix_handle(artist)
+    best = None
+    for query in build_soundcloud_queries(artist, title, hint=hint):
         results = search_soundcloud_api(query)
         if not results:
             continue
         for track in results:
-            result = try_soundcloud_api_result(track, artist, title, config)
-            if result:
-                logger.info(f"  SoundCloud cover found (confidence {result['confidence']:.2f})")
-                return result['thumbnail']
+            result = try_soundcloud_api_result(track, artist, title, config, hint=hint)
+            if not result or not result['thumbnail']:
+                continue
+            if best is None or result['confidence'] > best['confidence']:
+                best = result
+    if best:
+        logger.info(f"  SoundCloud cover found (confidence {best['confidence']:.2f})")
+        return best['thumbnail']
     return None
 
 

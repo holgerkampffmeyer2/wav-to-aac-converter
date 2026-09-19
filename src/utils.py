@@ -146,6 +146,14 @@ def load_config() -> Dict[str, Any]:
         "timeout_seconds": 30,
         "fuzzy_threshold": 0.8,
         "soundcloud_confidence_threshold": 0.6,
+        "loudness": {
+            "mode": "fast",
+            "target_tp": -0.5,
+            "max_retries": 2,
+            "risk_threshold_db": -2.0,
+            "reserve_aac_db": 2.5,
+            "reserve_mp3_db": 1.5
+        },
         "metadata": {
             "enabled": True,
             "offline": False,
@@ -242,6 +250,44 @@ def strip_all_bracketed(text: str) -> str:
     return ' '.join(result.split())
 
 
+_REMIX_QUALIFIER_TOKENS = {
+    'radio', 'clean', 'explicit', 'instrumental', 'acappella', 'acapella', 'live',
+    'extended', 'club', 'main', 'single', 'original', 'album', 'acoustic', 'bonus',
+    'demo', 'mix', 'edit', 'remix', 'dub', 'vip', 'editrmx', 'rmx', 'refix'
+}
+
+
+def _has_remix_marker(text: str) -> bool:
+    """True if text contains a remix/edit-type qualifier marker."""
+    return bool(REMIX_KEYWORDS_RE.search(text or ''))
+
+
+def extract_remix_handle(title: str) -> Optional[str]:
+    """Extract a remixer/uploader hint from bracketed remix markers.
+
+    E.g. ``'(LXRENZ REMIX)'`` -> ``'LXRENZ'``. Returns ``None`` for pure
+    qualifiers with no handle (``'(Radio Edit)'``, ``'(Extended Mix)'``,
+    ``'(Clean)'``, catalog numbers, ...).
+    """
+    if not title:
+        return None
+    pattern = re.compile(r'\(([^()]*)\)|\[([^\[\]]*)\]')
+    for match in pattern.finditer(title):
+        content = (match.group(1) if match.group(1) is not None else match.group(2)) or ''
+        content = content.strip()
+        if not content or not REMIX_KEYWORDS_RE.search(content):
+            continue
+        kw_match = REMIX_KEYWORDS_RE.search(content)
+        if kw_match is None:
+            continue
+        prefix = content[:kw_match.start()].strip().strip('-').strip()
+        tokens = [t for t in re.findall(r'[A-Za-z0-9]+', prefix)
+                  if t.lower() not in _REMIX_QUALIFIER_TOKENS]
+        if tokens:
+            return ' '.join(tokens).strip()
+    return None
+
+
 def split_artist_variants(artist: str) -> list:
     """Return artist variants for collaborations (feat., &, +, vs., x)."""
     artist = (artist or '').strip()
@@ -264,13 +310,17 @@ def split_artist_variants(artist: str) -> list:
     return variants
 
 
-def build_soundcloud_queries(artist: str, title: str) -> list:
+def build_soundcloud_queries(artist: str, title: str, hint: Optional[str] = None) -> list:
     """Build ordered candidate queries for SoundCloud search.
 
     SoundCloud's /search/tracks is sensitive to non-title tokens such as catalog
     numbers ([DR016]) or mix qualifiers: a query containing them returns no
     results even when the track exists. Each candidate strips those tokens from
     the query; confidence scoring still runs against the full expected values.
+
+    When a remixer/uploader hint is available (e.g. ``'LXRENZ'`` from
+    ``'(LXRENZ REMIX)'``), extra variants including it are added so the actual
+    remix (usually uploaded by that handle) surfaces in the results.
     """
     artist = (artist or '').strip()
     title = (title or '').strip()
@@ -285,6 +335,14 @@ def build_soundcloud_queries(artist: str, title: str) -> list:
     variants = [cleaned, stripped]
     if prefix and prefix not in variants:
         variants.append(prefix)
+    # Remixer/uploader hint makes the specific remix findable even when the
+    # original release outranks it on a bare title query.
+    if hint:
+        hint = hint.strip()
+        for v in (cleaned, stripped):
+            hinted = f"{hint} {v}".strip()
+            if hinted and hinted not in variants:
+                variants.append(hinted)
 
     candidates = []
     seen = set()
@@ -317,15 +375,41 @@ def _token_containment(needle: str, haystack: str) -> float:
 
 
 def _soundcloud_confidence(expected_artist: str, expected_title: str,
-                           api_title: str, uploader: str) -> float:
-    """Combine title-based confidence with uploader-artist agreement."""
+                           api_title: str, uploader: str,
+                           hint: Optional[str] = None) -> float:
+    """Combine title-based confidence with uploader-artist and remix agreement.
+
+    ``hint`` is a remixer/uploader handle extracted from the source filename
+    (e.g. ``'LXRENZ'`` for ``'(LXRENZ REMIX)'``). When present, candidates are
+    scored against it: a matching uploader is boosted, a conflicting one is
+    penalised, and plain original releases (no remix marker in the title) score
+    lower.
+    """
     base = calculate_match_confidence(expected_artist, expected_title, api_title)
+
+    if hint and hint.strip():
+        uploader_tokens = re.findall(r'\w+', (uploader or '').lower())
+        hint_tokens = re.findall(r'\w+', hint.lower())
+        if hint_tokens and uploader_tokens:
+            if all(t in uploader_tokens for t in hint_tokens):
+                base = max(base, (base + 0.9) / 2)
+            elif any(t in uploader_tokens for t in hint_tokens):
+                base *= 0.8
+            else:
+                base = min(base - 0.35, base * 0.6)
+        elif hint_tokens:
+            base *= 0.75
+        # Prefer candidates that also carry a remix marker over plain originals.
+        if _has_remix_marker(expected_title) and not _has_remix_marker(api_title):
+            base -= 0.25
+        return max(0.0, min(1.0, base))
+
     if not expected_artist or not uploader:
-        return base
+        return max(0.0, min(1.0, base))
     uploader_conf = _token_containment(expected_artist, uploader)
     if uploader_conf >= 0.5:
         return max(base, (base + uploader_conf) / 2)
-    return base
+    return max(0.0, min(1.0, base))
 
 
 def calculate_match_confidence(expected_artist: str, expected_title: str, found_track_title: str) -> float:
@@ -462,10 +546,12 @@ def search_soundcloud_api(query: str, limit: int = 20, pages: Optional[int] = No
 
 
 def try_soundcloud_api_result(track: dict, expected_artist: str, expected_title: str,
-                              config: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+                              config: Optional[Dict[str, Any]] = None,
+                              hint: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Validate a SoundCloud API track result with confidence scoring.
 
     Returns enriched dict with title, artist, thumbnail, url, confidence.
+    ``hint`` is an optional remixer/uploader handle used to disambiguate remixes.
     """
     if config is None:
         config = load_config()
@@ -478,7 +564,7 @@ def try_soundcloud_api_result(track: dict, expected_artist: str, expected_title:
     if not api_title:
         return None
 
-    confidence = _soundcloud_confidence(expected_artist, expected_title, api_title, uploader)
+    confidence = _soundcloud_confidence(expected_artist, expected_title, api_title, uploader, hint=hint)
     threshold = config.get('soundcloud_confidence_threshold', 0.6)
 
     if confidence >= threshold:

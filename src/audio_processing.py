@@ -40,6 +40,22 @@ def analyze_loudness(wav_path: str) -> Optional[Dict[str, Any]]:
         logger.warning(f"Loudness analysis parse error: {e}")
         return None
 
+def measure_output_true_peak(path: str) -> Optional[float]:
+    """Measure the true peak (dBTP) of an encoded output file via loudnorm summary.
+
+    Returns None when the measurement fails (e.g. file not readable). Fast on
+    already-encoded 44.1kHz files (~seconds).
+    """
+    import re
+    cmd = f'ffmpeg -hide_banner -i {shq(path)} -af loudnorm=print_format=summary -f null - 2>&1'
+    success, stdout, stderr = run_cmd(cmd)
+    if not success:
+        return None
+    match = re.search(r'Input True Peak:\s+([+-]?[\d.]+)\s*dBTP', stdout + stderr)
+    if not match:
+        return None
+    return float(match.group(1))
+
 
 def encode_audio(wav_path: str, output_path: str, metadata: Dict[str, Any], gain_db: float, fmt: str) -> bool:
     """Encode WAV to MP3/M4A with metadata."""

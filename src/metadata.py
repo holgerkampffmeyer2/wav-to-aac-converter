@@ -298,11 +298,17 @@ def _lookup_deezer(term: str):
 
 
 def _lookup_soundcloud(search_term: str):
-    """Lookup track on SoundCloud via API v2 with confidence scoring."""
+    """Lookup track on SoundCloud via API v2 with confidence scoring.
+
+    Collects all candidates above the confidence threshold across every query
+    and returns the highest-scoring match (remix-safe: a remixer hint from the
+    source filename is used to disambiguate uploader/title).
+    """
     from .utils import (
         search_soundcloud_api,
         try_soundcloud_api_result,
         build_soundcloud_queries,
+        extract_remix_handle,
         load_config,
     )
 
@@ -314,16 +320,21 @@ def _lookup_soundcloud(search_term: str):
         return None, None
 
     config = load_config()
-    for query in build_soundcloud_queries(artist_name, track_name):
+    hint = extract_remix_handle(track_name) or extract_remix_handle(artist_name)
+    best = None
+    for query in build_soundcloud_queries(artist_name, track_name, hint=hint):
         results = search_soundcloud_api(query)
         if not results:
             logger.debug(f"  SoundCloud: no API results for '{query}'")
             continue
         for track in results:
-            result = try_soundcloud_api_result(track, artist_name, track_name, config)
-            if result:
-                logger.debug(f"  SoundCloud found: {result['artist']} - {result['title']} (confidence {result['confidence']:.2f})")
-                return result['artist'], result['title']
+            result = try_soundcloud_api_result(track, artist_name, track_name, config, hint=hint)
+            if result and (best is None or result['confidence'] > best['confidence']):
+                best = result
+
+    if best:
+        logger.debug(f"  SoundCloud found: {best['artist']} - {best['title']} (confidence {best['confidence']:.2f})")
+        return best['artist'], best['title']
 
     return None, None
 

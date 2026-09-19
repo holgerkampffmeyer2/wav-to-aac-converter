@@ -64,6 +64,15 @@ The converter can be configured using a `config.json` file in the same directory
   "retry_attempts": 3,
   "timeout_seconds": 30,
   "fuzzy_threshold": 0.8,
+  "soundcloud_confidence_threshold": 0.6,
+  "loudness": {
+    "mode": "fast",
+    "target_tp": -0.5,
+    "max_retries": 2,
+    "risk_threshold_db": -2.0,
+    "reserve_aac_db": 2.5,
+    "reserve_mp3_db": 1.5
+  },
   "metadata": {
     "enabled": true,
     "offline": false,
@@ -90,6 +99,11 @@ The converter can be configured using a `config.json` file in the same directory
 - `metadata.enrich_tags`: Tags to write when enriching (default: label, genre, album, year, track_number)
 - `metadata.label_source_tag`: Tag name for label (default: label)
 - `soundcloud_confidence_threshold`: Minimum confidence score (0.0-1.0) for SoundCloud web search results (default: 0.6)
+- `loudness.mode`: Loudness mode - `fast` (single pass + reserve gain, default), `verify` (measure output true peak and re-encode until within target), `off` (legacy gain only)
+- `loudness.target_tp`: Target output true peak in dBTP (default: -0.5)
+- `loudness.max_retries`: Max re-encode attempts in verify mode (default: 2)
+- `loudness.risk_threshold_db`: Source true peak above this triggers the reserve path / warning (default: -2.0)
+- `loudness.reserve_aac_db` / `loudness.reserve_mp3_db`: Extra headroom subtracted in fast mode on risky sources (default: 2.5 / 1.5)
 
 Note: Unicode filename to ASCII conversion is now automatic and always applied to ensure compatibility with audio processing tools.
 
@@ -140,6 +154,11 @@ audioconvert --format m4a file.wav
 # Metadata options
 audioconvert --no-metadata file.wav    # Disable online metadata lookup and enrichment (default: enabled)
 audioconvert --offline file.wav        # Offline mode: no online lookups, local cover only
+
+# Loudness control
+audioconvert --loudness verify file.wav   # Measure output, guarantee true peak ≤ target
+audioconvert --loudness fast file.wav     # Single pass + warning when verify is needed
+audioconvert --loudness off file.wav      # Legacy gain only (no clipping protection)
 ```
 
 ## Unicode Filename Handling
@@ -207,7 +226,7 @@ sudo apt install ffmpeg python3
 | Setting | Value |
 |---------|-------|
 | Codec | MP3 (libmp3lame) or M4A/AAC, 320kbps |
-| Loudness | True Peak ≤ -0.1 dBTP |
+| Loudness | fast (default) / verify / off; target true peak -0.5 dBTP; codec-specific headroom on risky sources |
 | Cover Size | 600x600 px |
 
 ### Output Formats
@@ -220,6 +239,8 @@ sudo apt install ffmpeg python3
 1. **Source file**: Extract embedded cover from source (WAV/FLAC/AIFF)
 2. **Local folder**: Look for `cover.png`, `cover.jpg`, exact filename match, or a normalized substring match (e.g. `Mix194.png` matches `DJ Hulk - Mix194 - Afrohouse.wav`; longest match wins, min 3 chars). No fallback to arbitrary images in the folder.
 3. **Online search**: Configurable order via `metadata.sources` (default: SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz, skipped in `--offline` mode)
+
+Remixes: a bracketed remixer in the filename (e.g. `ACTIN' TOUGH (LXRENZ REMIX)`) is extracted as a hint. SoundCloud queries then include the uploader handle and candidates are scored by uploader/remix-marker agreement — the actual remix (uploaded by the remixer handle) wins over the plain original release. SoundCloud returns the highest-confidence validated result **that has artwork**.
 
 ## Metadata Strategy
 
