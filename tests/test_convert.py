@@ -1662,6 +1662,90 @@ class TestResolveArtistTitleOnline(unittest.TestCase):
             self.assertEqual((artist, title), ("", "Bar"))
             mock_lookup.assert_not_called()
 
+    def test_rejects_unrelated_track_sharing_a_passing_word(self):
+        """A source answering with a different track must not overwrite the filename pair.
+
+        Regression: the SoundCloud lookup for the reversed ordering returned
+        'Randoree - Shaking (notdanilo & Gianluca Emiliani Edit) [FREE DOWNLOAD]'
+        for 'Victony - SLICK (notdanilo Edit)'. The artist word 'notdanilo' occurs
+        in that unrelated title, which used to be enough to accept it.
+        """
+        from src.metadata import resolve_artist_title_online
+        wrong = ('notdanilo', 'Randoree - Shaking (notdanilo & Gianluca Emiliani Edit) [FREE DOWNLOAD]')
+        with patch('src.metadata.lookup_online_metadata', side_effect=[(None, None), wrong]):
+            artist, title = resolve_artist_title_online(
+                "notdanilo", "Victony - SLICK (notdanilo Edit)", {}
+            )
+        self.assertEqual(artist, 'notdanilo')
+        self.assertEqual(title, 'Victony - SLICK (notdanilo Edit)')
+
+    def test_rejects_unrelated_track_for_correct_ordering(self):
+        """Same protection for the artist-first ordering."""
+        from src.metadata import resolve_artist_title_online
+        wrong = ('Brunello', 'Some Other Song (Sam Blans, LOTTEN Edit)')
+        with patch('src.metadata.lookup_online_metadata', side_effect=[wrong, (None, None)]):
+            artist, title = resolve_artist_title_online(
+                "Brunello", "Science Fiction (Sam Blans, LOTTEN Edit)", {}
+            )
+        self.assertEqual(artist, 'Brunello')
+        self.assertEqual(title, 'Science Fiction (Sam Blans, LOTTEN Edit)')
+
+    def test_promo_boilerplate_does_not_block_a_real_match(self):
+        """'[FREE DOWNLOAD]' style noise is ignored, so a real match still wins."""
+        from src.metadata import resolve_artist_title_online
+        canonical = ('Ida Corr', 'Let Me Think About It (Fedde Le Grand Remix) [FREE DOWNLOAD]')
+        with patch('src.metadata.lookup_online_metadata', side_effect=[canonical, canonical]):
+            artist, title = resolve_artist_title_online(
+                "Let me think about it", "Ida Corr Fedde Le Grand (Kefrennnn Remix)", {}
+            )
+        self.assertEqual(artist, 'Ida Corr')
+        self.assertEqual(title, 'Let Me Think About It (Fedde Le Grand Remix) [FREE DOWNLOAD]')
+
+    def test_forwards_explicit_artist_and_title_to_lookup(self):
+        """The artist/title parts are handed over so titles containing ' - ' survive."""
+        from src.metadata import resolve_artist_title_online
+        canonical = ('notdanilo', 'Victony - SLICK (notdanilo Edit)')
+        with patch('src.metadata.lookup_online_metadata', return_value=canonical) as mock_lookup:
+            resolve_artist_title_online("notdanilo", "Victony - SLICK (notdanilo Edit)", {})
+        first_call = mock_lookup.call_args_list[0]
+        self.assertEqual(first_call.kwargs['artist'], 'notdanilo')
+        self.assertEqual(first_call.kwargs['title'], 'Victony - SLICK (notdanilo Edit)')
+
+
+class TestOrderingMatchScoring(unittest.TestCase):
+    """Tests for the per-axis scoring used by resolve_artist_title_online."""
+
+    def test_artist_axis_allows_shorter_online_credit(self):
+        """Filenames often carry the longer collaboration credit."""
+        from src.metadata import _artist_axis_match
+        self.assertEqual(_artist_axis_match("Ida Corr", "Ida Corr Fedde Le Grand"), 1.0)
+
+    def test_artist_axis_rejects_unrelated_credit(self):
+        """An online artist the filename never mentions scores 0."""
+        from src.metadata import _artist_axis_match
+        self.assertEqual(_artist_axis_match("Only Bangs", "notdanilo"), 0.0)
+
+    def test_title_axis_rejects_extra_unrelated_words(self):
+        """A passing shared word is not enough — the title must be the same track."""
+        from src.metadata import _title_axis_match
+        self.assertEqual(
+            _title_axis_match(
+                "Randoree - Shaking (notdanilo & Gianluca Emiliani Edit) [FREE DOWNLOAD]",
+                "notdanilo",
+            ),
+            0.0,
+        )
+
+    def test_title_axis_ignores_boilerplate_and_qualifiers(self):
+        """Brackets and promo words are stripped from both sides before comparing."""
+        from src.metadata import _title_axis_match
+        self.assertEqual(
+            _title_axis_match(
+                "Let Me Think About It (Fedde Le Grand Remix) [FREE DOWNLOAD]", "Let me think about it"
+            ),
+            1.0,
+        )
+
 
 class TestURLValidation(unittest.TestCase):
     """Tests for URL validation security."""
@@ -2140,6 +2224,19 @@ class TestTrySoundcloudApiResult(unittest.TestCase):
         self.assertEqual(result['title'], 'Test Artist - Test Song [Original Mix]')
         self.assertIn('t500x500.jpg', result['thumbnail'])
         self.assertGreaterEqual(result['confidence'], 0.9)
+
+    def test_png_artwork_is_upgraded(self):
+        """SoundCloud also serves .png artwork; those must be upgraded too."""
+        from src.utils import try_soundcloud_api_result, load_config
+        track = {
+            'title': 'Test Artist - Test Song [Original Mix]',
+            'user': {'username': 'Uploader Name'},
+            'artwork_url': 'https://i1.sndcdn.com/art-large.png',
+            'permalink_url': 'https://soundcloud.com/uploader/test-artist-test-song',
+        }
+        result = try_soundcloud_api_result(track, 'Test Artist', 'Test Song', load_config())
+        self.assertIsNotNone(result)
+        self.assertIn('t500x500.png', result['thumbnail'])
 
     def test_low_confidence_returns_none(self):
         """Low confidence match returns None."""

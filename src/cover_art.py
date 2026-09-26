@@ -388,7 +388,10 @@ def _find_cover(wav_path: str, artist: str, title: str, original_wav_path: str =
         return local_cover
     
     if not offline and artist and title:
-        search_title = clean_title_for_search(title) if clean_title_for_search(title) else title
+        # Cleaned title (no remix/edit markers) suits the plain search APIs, but
+        # SoundCloud needs the full title: the bracketed remixer is the hint that
+        # tells uploads of different remixes apart.
+        search_title = clean_title_for_search(title) or title
         sources = _get_cover_sources(config)
         
         for source_name in sources:
@@ -397,8 +400,9 @@ def _find_cover(wav_path: str, artist: str, title: str, original_wav_path: str =
                 logger.warning(f"  Unknown cover source: {source_name}")
                 continue
             label, func = entry
+            source_title = title if source_name.lower() == 'soundcloud' else search_title
             try:
-                cover_url = func(artist, search_title, config)
+                cover_url = func(artist, source_title, config)
                 if cover_url:
                     logger.info(f"  Cover: Found on {label}")
                     return cover_url

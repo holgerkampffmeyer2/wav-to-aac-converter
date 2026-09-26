@@ -46,6 +46,8 @@ BANDCAMP_URL_RE = re.compile(r'https?://[^\s"\'<>]*\.bandcamp\.com/(?:track|albu
 NON_WORD_RE = re.compile(r'[^\w]')
 MULTI_DASH_RE = re.compile(r'-+')
 BRACKET_CLEANUP_RE = re.compile(r'\([^)]*\)|\[[^\]]*\]')
+# SoundCloud artwork size tokens that are worth upgrading to t500x500.
+ARTWORK_SIZE_RE = re.compile(r'-(?:large|t67x67|crop)\.(jpg|png)$', re.IGNORECASE)
 REMIX_KEYWORDS_RE = re.compile(
     r'(?:remix|edit|mix|flip|rework|cover|feat|ft\.|featuring|radio|clean|explicit|instrumental|acappella|bootleg)',
     re.IGNORECASE
@@ -568,9 +570,13 @@ def try_soundcloud_api_result(track: dict, expected_artist: str, expected_title:
     threshold = config.get('soundcloud_confidence_threshold', 0.6)
 
     if confidence >= threshold:
-        # Upgrade artwork to t500x500 for higher resolution
-        if artwork and '-large.jpg' in artwork:
-            artwork = artwork.replace('-large.jpg', '-t500x500.jpg')
+        if artwork:
+            # Upgrade artwork to t500x500 for higher resolution. SoundCloud uses
+            # several size tokens (-large, -t67x67, -crop) and serves both .jpg and
+            # .png artwork, so only the size token may be rewritten.
+            upgraded = ARTWORK_SIZE_RE.sub(r'-t500x500.\1', artwork)
+            if upgraded != artwork:
+                artwork = upgraded
         result = {
             'title': api_title,
             'artist': uploader,

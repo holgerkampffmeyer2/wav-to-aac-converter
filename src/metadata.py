@@ -117,7 +117,7 @@ def extract_metadata(wav_path: str) -> Dict[str, Any]:
 _itunes_cache = {}
 
 
-def _lookup_itunes(term: str):
+def _lookup_itunes(term: str, artist: Optional[str] = None, title: Optional[str] = None):
     """Lookup track on iTunes Search API with fuzzy matching."""
     from .utils import strip_all_bracketed
     term = strip_all_bracketed(term or '').strip()
@@ -188,7 +188,7 @@ def _lookup_itunes(term: str):
     return None, None
 
 
-def _lookup_musicbrainz(term: str):
+def _lookup_musicbrainz(term: str, artist: Optional[str] = None, title: Optional[str] = None):
     """Lookup track on MusicBrainz API."""
     from .utils import strip_all_bracketed
     term = strip_all_bracketed(term or '').strip()
@@ -231,7 +231,7 @@ def _lookup_musicbrainz(term: str):
     return None, None
 
 
-def _lookup_bandcamp(term: str):
+def _lookup_bandcamp(term: str, artist: Optional[str] = None, title: Optional[str] = None):
     """Lookup track on Bandcamp via web search."""
     from .utils import strip_all_bracketed
     term = strip_all_bracketed(term or '').strip()
@@ -270,7 +270,7 @@ def _lookup_bandcamp(term: str):
     return None, None
 
 
-def _lookup_deezer(term: str):
+def _lookup_deezer(term: str, artist: Optional[str] = None, title: Optional[str] = None):
     """Lookup track on Deezer API."""
     from .utils import strip_all_bracketed
     term = strip_all_bracketed(term or '').strip()
@@ -297,12 +297,16 @@ def _lookup_deezer(term: str):
     return None, None
 
 
-def _lookup_soundcloud(search_term: str):
+def _lookup_soundcloud(search_term: str, artist: Optional[str] = None, title: Optional[str] = None):
     """Lookup track on SoundCloud via API v2 with confidence scoring.
 
     Collects all candidates above the confidence threshold across every query
     and returns the highest-scoring match (remix-safe: a remixer hint from the
     source filename is used to disambiguate uploader/title).
+
+    ``artist``/``title`` may be passed when the caller already knows both parts.
+    They are used verbatim; otherwise the combined ``search_term`` is split on the
+    first ``' - '``, which corrupts titles that contain a dash themselves.
     """
     from .utils import (
         search_soundcloud_api,
@@ -312,10 +316,12 @@ def _lookup_soundcloud(search_term: str):
         load_config,
     )
 
-    if not search_term:
+    if not search_term and not (artist and title):
         return None, None
 
-    artist_name, track_name = extract_metadata_from_filename(search_term)
+    artist_name, track_name = (artist or '').strip(), (title or '').strip()
+    if not track_name:
+        artist_name, track_name = extract_metadata_from_filename(search_term)
     if not track_name:
         return None, None
 
@@ -339,6 +345,9 @@ def _lookup_soundcloud(search_term: str):
     return None, None
 
 
+# All lookups share the signature (search_term, artist=None, title=None) so
+# lookup_online_metadata can hand over known artist/title parts; only SoundCloud
+# uses them, the others keep working on the combined search term.
 METADATA_SOURCE_DISPATCH = {
     'itunes': ('iTunes', _lookup_itunes),
     'deezer': ('Deezer', _lookup_deezer),
@@ -348,12 +357,16 @@ METADATA_SOURCE_DISPATCH = {
 }
 
 
-def lookup_online_metadata(base_name: str, sources: Optional[list] = None):
+def lookup_online_metadata(base_name: str, sources: Optional[list] = None,
+                           artist: Optional[str] = None, title: Optional[str] = None):
     """Look up metadata online using configured sources.
     
     Args:
         base_name: Search term (artist + title)
         sources: Ordered list of source names. If None, uses config.
+        artist: Optional known artist, passed to sources that can use it directly
+            (SoundCloud) instead of re-splitting ``base_name``.
+        title: Optional known title, see ``artist``.
     
     Returns:
         (artist, title) tuple or (None, None)
@@ -369,10 +382,13 @@ def lookup_online_metadata(base_name: str, sources: Optional[list] = None):
             logger.warning(f"  Unknown metadata source: {source_name}")
             continue
         label, func = source_entry
-        artist, title = func(base_name)
         if artist and title:
-            logger.debug(f"  {label} found: {artist} - {title}")
-            return artist, title
+            found_artist, found_title = func(base_name, artist, title)
+        else:
+            found_artist, found_title = func(base_name)
+        if found_artist and found_title:
+            logger.debug(f"  {label} found: {found_artist} - {found_title}")
+            return found_artist, found_title
     
     return None, None
 
@@ -400,14 +416,67 @@ def extract_metadata_from_filename(filename: str) -> Tuple[str, str]:
     return '', name.strip()
 
 
-def _word_containment(needle: str, haystack: str) -> float:
-    """Fraction of needle's words present in haystack (0.0-1.0)."""
+# Promotional/technical boilerplate that online titles add on top of the real
+# track name. Removed on both sides before comparing so it cannot dilute (or
+# fake) a match.
+_ONLINE_NOISE_TOKENS = {
+    'free', 'download', 'downloads', 'full', 'version', 'versions', 'official',
+    'audio', 'video', 'hd', 'hq', 'mp3', 'web', 'rip', 'preview', 'mv',
+    'promo', 'premiere', 'exclusive', 'stream', 'listen', 'lyrics', 'lyric',
+    'lyricvideo', 'out', 'now', 'new',
+}
+
+
+def _comparable_words(text: str) -> set:
+    """Word set of ``text`` without brackets and promotional boilerplate."""
     import re
-    needle_words = set(re.findall(r'\w+', (needle or '').lower()))
-    haystack_words = set(re.findall(r'\w+', (haystack or '').lower()))
-    if not needle_words:
+    from src.utils import strip_all_bracketed
+    cleaned = strip_all_bracketed(text or '')
+    return {
+        w for w in re.findall(r'\w+', cleaned.lower())
+        if w not in _ONLINE_NOISE_TOKENS
+    }
+
+
+# Minimum per-axis agreement before an online (artist, title) pair may replace
+# filename-derived metadata. Deliberately high: this step only confirms the
+# "Artist - Title" vs "Title - Artist" ordering, it must never adopt a
+# different track.
+_ORDERING_MATCH_THRESHOLD = 0.6
+
+
+def _containment(needle_words: set, haystack_words: set) -> float:
+    """Fraction of needle_words that occur in haystack_words (0.0-1.0)."""
+    if not needle_words or not haystack_words:
         return 0.0
     return len(needle_words & haystack_words) / len(needle_words)
+
+
+def _artist_axis_match(online: str, candidate: str) -> float:
+    """Agreement of an online artist credit with a filename part.
+
+    Filenames often carry the *longer* credit ("Ida Corr Fedde Le Grand" vs the
+    canonical "Ida Corr"), so the online credit only has to be covered by the
+    filename part — it must not introduce a name the filename does not mention.
+    """
+    return _containment(_comparable_words(online), _comparable_words(candidate))
+
+
+def _title_axis_match(online: str, candidate: str) -> float:
+    """Agreement of an online track title with a filename part.
+
+    Unlike the artist credit, a title is the same string on both sides apart from
+    remix qualifiers and boilerplate, so neither side may contribute unrelated
+    words: containment has to hold in both directions. This is what rejects a
+    source that answers with a *different* track sharing only a passing word
+    (e.g. "notdanilo" occurring inside someone else's title).
+    """
+    online_words = _comparable_words(online)
+    candidate_words = _comparable_words(candidate)
+    return min(
+        _containment(online_words, candidate_words),
+        _containment(candidate_words, online_words),
+    )
 
 
 def resolve_artist_title_online(artist: str, title: str, config: Optional[Dict[str, Any]] = None) -> Tuple[str, str]:
@@ -417,6 +486,12 @@ def resolve_artist_title_online(artist: str, title: str, config: Optional[Dict[s
     "Let me think about it - Ida Corr Fedde Le Grand (Kefrennnn Remix)"). For each
     plausible ordering, query the configured metadata sources; keep the online result
     whose artist and title best match the filename parts.
+
+    An online result is only adopted when **both** the artist and the title axis
+    really match the filename parts (``_ORDERING_MATCH_THRESHOLD``). A source that
+    answers with a different track — a common outcome, because artist names such as
+    "notdanilo" also occur inside unrelated titles — is rejected instead of
+    overwriting correct filename metadata.
 
     Returns the canonical (artist, title) from the best-matching source, or the input
     unchanged when no source returns a confident match.
@@ -432,18 +507,20 @@ def resolve_artist_title_online(artist: str, title: str, config: Optional[Dict[s
     best_score = 0.0
     best = None
     for cand_artist, cand_title in candidates:
-        online_artist, online_title = lookup_online_metadata(f"{cand_artist} {cand_title}")
+        online_artist, online_title = lookup_online_metadata(
+            f"{cand_artist} {cand_title}", artist=cand_artist, title=cand_title
+        )
         if not online_artist or not online_title:
             continue
-        score = max(
-            _word_containment(online_artist, cand_artist) + _word_containment(online_title, cand_title),
-            _word_containment(online_artist, cand_title) + _word_containment(online_title, cand_artist),
+        score = min(
+            _artist_axis_match(online_artist, cand_artist),
+            _title_axis_match(online_title, cand_title),
         )
         if score > best_score:
             best_score = score
             best = (online_artist, online_title)
 
-    if best and best_score >= 1.0:
+    if best and best_score >= _ORDERING_MATCH_THRESHOLD:
         return best
     return artist, title
 
