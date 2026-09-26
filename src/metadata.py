@@ -934,7 +934,7 @@ def get_additional_metadata_online(artist: str, title: str) -> Dict[str, Optiona
     if cache_key in _additional_metadata_cache:
         return _additional_metadata_cache[cache_key]
     
-    result = {'album': None, 'year': None, 'track_number': None}
+    result: Dict[str, Optional[str]] = {'album': None, 'year': None, 'track_number': None}
     
     try:
         query = quote(f"{artist} {title}")

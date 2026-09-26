@@ -216,7 +216,7 @@ def search_all_sources(artist: str, title: str, filename: str = "") -> tuple[dic
     return result_metadata, cover_url
 
 
-def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any], original_wav_path: str = None) -> Tuple[Dict[str, Any], Optional[str]]:
+def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any], original_wav_path: Optional[str] = None) -> Tuple[Dict[str, Any], Optional[str]]:
     """Combined function: Online metadata lookup + enrich + cover search.
     
     Cover priority:
@@ -338,7 +338,7 @@ def _get_cover_sources(config: Dict[str, Any]) -> list:
     return [s for s in all_sources if s.lower() in COVER_SOURCE_DISPATCH]
 
 
-def _find_cover(wav_path: str, artist: str, title: str, original_wav_path: str = None,
+def _find_cover(wav_path: str, artist: str, title: str, original_wav_path: Optional[str] = None,
                 offline: bool = False, config: Optional[Dict[str, Any]] = None) -> Optional[str]:
     """Find cover with priority: embedded → local → online (configurable sources).
     

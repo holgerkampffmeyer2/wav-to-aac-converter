@@ -70,7 +70,7 @@ def save_result_json(wav_path: str, metadata: Dict[str, Any], loudness: Optional
         json.dump(result, f, indent=2)
 
 
-def verify_output(output_path: str, fmt: str) -> Tuple[bool, Dict[str, bool]]:
+def verify_output(output_path: str, fmt: str) -> Tuple[bool, Dict[str, Any]]:
     """Verify output file."""
     if not Path(output_path).exists():
         return False, {"error": "File not found"}
@@ -119,7 +119,7 @@ def compute_loudness_gain(input_tp: float, fmt: str, config: Dict[str, Any],
     return gain_db, risk
 
 
-def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True, config: Dict[str, Any] = None) -> Tuple[bool, Optional[str]]:
+def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True, config: Optional[Dict[str, Any]] = None) -> Tuple[bool, Optional[str]]:
     """Convert a single WAV file to MP3 or M4A."""
     original_wav_path = wav_path
     temp_dir = None
