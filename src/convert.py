@@ -202,7 +202,7 @@ def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True, conf
         
         if not success:
             logger.error(f"  Encoding failed")
-            save_result_json(wav_path, metadata, loudness, output_name, False, False, fmt)
+            save_result_json(original_wav_path, metadata, loudness, output_name, False, False, fmt)
             for f in [temp_output, temp_cover]:
                 if f and Path(f).exists():
                     os.remove(f)
@@ -262,7 +262,7 @@ def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True, conf
             return True, output_name
         else:
             logger.error(f"  FAIL: Verification failed - {result}")
-            save_result_json(wav_path, metadata, loudness, output_name, False, bool(info.get('cover')), fmt)
+            save_result_json(original_wav_path, metadata, loudness, output_name, False, bool(info.get('cover')), fmt)
             if temp_dir and Path(temp_dir).exists():
                 shutil.rmtree(temp_dir, ignore_errors=True)
             return False, None
