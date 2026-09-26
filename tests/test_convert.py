@@ -1033,6 +1033,60 @@ class TestIntegration(unittest.TestCase):
                 except:
                     pass
 
+    @patch('src.audio_processing.download_cover')
+    @patch('src.audio_processing.encode_audio')
+    @patch('src.audio_processing.embed_cover')
+    @patch('src.convert.verify_output')
+    @patch('src.metadata.lookup_online_metadata')
+    @patch('src.audio_processing.analyze_loudness')
+    def test_output_written_next_to_source_not_cwd(self, mock_loudness, mock_lookup, mock_verify, mock_embed, mock_encode, mock_download):
+        # Ensure output is written to the source directory even when cwd is different
+        original_cwd = os.getcwd()
+        try:
+            os.chdir(tempfile.gettempdir())
+            mock_loudness.return_value = {
+                'input_i': -16.0,
+                'input_tp': -1.0,
+                'input_lra': 8.0,
+                'input_thresh': -24.0
+            }
+            mock_lookup.return_value = ("Test Artist", "Test Song")
+            mock_download.return_value = False
+            mock_embed.return_value = False
+            mock_verify.return_value = (True, {'mp3': True, 'cover': False})
+
+            def mock_encode_func(wav_path, temp_output, metadata, gain_db, fmt):
+                # Create the temp output so rename works; place it in source dir via the test
+                with open(temp_output, 'wb') as f:
+                    f.write(b'dummy')
+                return True
+            mock_encode.side_effect = mock_encode_func
+
+            with patch('src.cover_art.search_deezer_cover', return_value=None), \
+                 patch('src.cover_art.search_musicbrainz_cover', return_value=None), \
+                 patch('src.cover_art.search_bandcamp_cover', return_value=None), \
+                 patch('src.cover_art.enrich_and_search_cover', return_value=({}, None)):
+
+                success, output_file = convert_file(self.wav_path, fmt='mp3', embed_cover=False)
+
+            self.assertTrue(success)
+            self.assertIsNotNone(output_file)
+            # Output must live next to the wav, not in cwd
+            self.assertTrue(os.path.abspath(output_file).startswith(os.path.abspath(self.test_dir)),
+                            f"Output {output_file} not in source dir {self.test_dir}")
+            self.assertFalse(os.path.exists(os.path.join(os.getcwd(), os.path.basename(output_file))),
+                             "Output should not be created in cwd")
+            # Also verify no file was created in cwd
+            self.assertFalse(os.path.isfile(os.path.join(tempfile.gettempdir(), os.path.basename(output_file))))
+        finally:
+            os.chdir(original_cwd)
+            if output_file and os.path.exists(output_file):
+                try:
+                    os.remove(output_file)
+                except:
+                    pass
+
+
 
 class TestLoudnormFailure(unittest.TestCase):
     """Tests for loudnorm failure handling."""

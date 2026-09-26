@@ -22,6 +22,7 @@ from .utils import (
     to_ascii_filename,
     clean_title_for_search,
     validate_soundcloud_client_id,
+    shq,
     run_cmd
 )
 
@@ -65,7 +66,12 @@ def save_result_json(wav_path: str, metadata: Dict[str, Any], loudness: Optional
     if warning:
         result["warning"] = warning
     
-    json_path = Path(output_name).with_suffix('.json')
+    # Store JSON next to the source WAV rather than next to the output name
+    # (or next to whatever the cwd happens to be). This is stable when the
+    # user invokes the CLI from an arbitrary working directory.
+    wav_dir = Path(wav_path).parent if wav_path else Path(output_name).parent
+    out_stem = Path(output_name).stem
+    json_path = wav_dir / f'{out_stem}.{fmt}.json'
     with open(json_path, 'w') as f:
         json.dump(result, f, indent=2)
 
@@ -75,7 +81,7 @@ def verify_output(output_path: str, fmt: str) -> Tuple[bool, Dict[str, Any]]:
     if not Path(output_path).exists():
         return False, {"error": "File not found"}
     
-    cmd = f'ffprobe -v quiet -show_format -show_streams "{output_path}"'
+    cmd = f'ffprobe -v quiet -show_format -show_streams {shq(output_path)}'
     success, stdout, _ = run_cmd(cmd)
     
     if not success:
@@ -142,11 +148,16 @@ def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True, conf
                 logger.info(f"  Using filename: {ascii_filename_path.name} (already ASCII)")
         
         base_name = Path(wav_path).stem
-        output_name = base_name + f'.{fmt}'
+        # Write next to the source file rather than into the current working
+        # directory, so `audioconvert /music/track.wav` does not drop the
+        # result into wherever the shell happened to be. The intermediates go
+        # there too: os.rename() fails across filesystem boundaries.
+        out_dir = Path(original_wav_path).parent
+        output_name = str(out_dir / (base_name + f'.{fmt}'))
         
         file_hash = hash(wav_path) % 1000000
-        temp_cover = f'cover_{file_hash}.jpg'
-        temp_output = f'output_{file_hash}.{fmt}'
+        temp_cover = str(out_dir / f'cover_{file_hash}.jpg')
+        temp_output = str(out_dir / f'output_{file_hash}.{fmt}')
         
         loudness = analyze_loudness(wav_path)
         if not loudness:
