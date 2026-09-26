@@ -227,7 +227,6 @@ def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True, conf
             logger.info(f"  Embedding cover: {cover_path}")
             try:
                 embed_success = audio_embed_cover(temp_output, cover_path, output_name, fmt)
-                logger.info(f"  Embed result: {embed_success}, type: {type(embed_success)}")
             except Exception as e:
                 logger.error(f"  Embed exception: {e}")
                 embed_success = False

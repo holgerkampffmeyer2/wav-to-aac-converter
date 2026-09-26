@@ -1746,6 +1746,31 @@ class TestOrderingMatchScoring(unittest.TestCase):
             1.0,
         )
 
+    def test_title_axis_ignores_unbracketed_boilerplate(self):
+        """Uploader boilerplate without brackets must not dilute the comparison."""
+        from src.metadata import _title_axis_match
+        self.assertEqual(
+            _title_axis_match("Breathe FREE DOWNLOAD Out Now", "Breathe"), 1.0
+        )
+
+    def test_comparable_words_keeps_ordinary_title_words(self):
+        """Words like 'new'/'out'/'version' are real title words, not noise.
+
+        Dropping them would make two *different* titles compare equal.
+        """
+        from src.metadata import _comparable_words, _title_axis_match
+        self.assertEqual(
+            sorted(_comparable_words("New of Emptiness")), ["emptiness", "new", "of"]
+        )
+        self.assertLess(
+            _title_axis_match("Out of Emptiness", "New of Emptiness"), 1.0
+        )
+
+    def test_comparable_words_never_returns_empty_for_a_real_title(self):
+        """A title made of noise-ish words must stay comparable, not vanish."""
+        from src.metadata import _comparable_words
+        self.assertTrue(_comparable_words("New Full Version Out Now"))
+
 
 class TestURLValidation(unittest.TestCase):
     """Tests for URL validation security."""
@@ -2113,7 +2138,7 @@ class TestSaveResultJSON(unittest.TestCase):
 class TestCalculateMatchConfidence(unittest.TestCase):
     """Tests for confidence scoring of SoundCloud matches."""
 
-    def test_word_containment_multi_word(self):
+    def test_word_overlap_multi_word(self):
         """Multi-word artist/title found as words within longer string."""
         from src.utils import calculate_match_confidence
         result = calculate_match_confidence(
@@ -2664,7 +2689,9 @@ class TestShellEscaping(unittest.TestCase):
         url = "https://example.com/art.jpg?x=1&y=2"
 
         with patch('src.audio_processing.run_cmd') as mock_run_cmd, \
-             patch('src.audio_processing.Path.exists', return_value=True):
+             patch('src.audio_processing.Path.exists', return_value=True), \
+             patch('src.audio_processing.Path.stat') as mock_stat:
+            mock_stat.return_value.st_size = 2048
             mock_run_cmd.return_value = (True, "", "")
             result = download_cover(url, "/tmp/cover.jpg")
             cmd = mock_run_cmd.call_args[0][0]
@@ -2835,6 +2862,27 @@ class TestSoundcloudRemixLookup(unittest.TestCase):
                 cover = search_soundcloud_cover('LXRENZ', "DEAN TURNLEY - ACTIN' TOUGH (LXRENZ REMIX)")
 
         self.assertEqual(cover, 'https://i1.sndcdn.com/art-t500x500.jpg')
+
+    def test_explicit_parts_are_not_re_split_on_first_dash(self):
+        """A title containing ' - ' must survive intact into confidence scoring."""
+        from src.metadata import _lookup_soundcloud
+
+        scored = []
+
+        def fake_score(track, expected_artist, expected_title, config, hint=None):
+            scored.append((expected_artist, expected_title))
+            return None
+
+        with patch('src.utils.search_soundcloud_api', return_value=[dict(self.REMIX)]), \
+             patch('src.utils.try_soundcloud_api_result', side_effect=fake_score), \
+             patch('src.utils.load_config', return_value={'soundcloud_confidence_threshold': 0.6}):
+            _lookup_soundcloud(
+                'notdanilo Victony - SLICK (notdanilo Edit)',
+                artist='notdanilo', title='Victony - SLICK (notdanilo Edit)',
+            )
+
+        self.assertTrue(scored)
+        self.assertEqual(set(scored), {('notdanilo', 'Victony - SLICK (notdanilo Edit)')})
 
 
 class TestComputeLoudnessGain(unittest.TestCase):

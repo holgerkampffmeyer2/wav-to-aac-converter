@@ -76,6 +76,9 @@ def encode_audio(wav_path: str, output_path: str, metadata: Dict[str, Any], gain
         cmd += f' {extra_args}'
     cmd += f' {shq(output_path)}'
     success, _, stderr = run_cmd(cmd)
+    if not success:
+        detail = (stderr or '').strip().splitlines()
+        logger.error(f"  ffmpeg: {detail[-1]}" if detail else "  ffmpeg: no error output")
     return success
 
 
@@ -145,6 +148,6 @@ def find_local_cover(wav_path: str) -> Optional[str]:
 
 def download_cover(url: str, output_path: str) -> bool:
     """Download cover art from URL using curl for binary data."""
-    cmd = f'curl -sL -m 30 -o {shq(output_path)} {shq(url)}'
+    cmd = f'curl -sfL -m 30 -o {shq(output_path)} {shq(url)}'
     success, _, _ = run_cmd(cmd)
-    return success and Path(output_path).exists()
+    return success and Path(output_path).exists() and Path(output_path).stat().st_size > 0

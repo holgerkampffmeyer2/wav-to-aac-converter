@@ -117,7 +117,7 @@ def extract_metadata(wav_path: str) -> Dict[str, Any]:
 _itunes_cache = {}
 
 
-def _lookup_itunes(term: str, artist: Optional[str] = None, title: Optional[str] = None):
+def _lookup_itunes(term: str):
     """Lookup track on iTunes Search API with fuzzy matching."""
     from .utils import strip_all_bracketed
     term = strip_all_bracketed(term or '').strip()
@@ -188,7 +188,7 @@ def _lookup_itunes(term: str, artist: Optional[str] = None, title: Optional[str]
     return None, None
 
 
-def _lookup_musicbrainz(term: str, artist: Optional[str] = None, title: Optional[str] = None):
+def _lookup_musicbrainz(term: str):
     """Lookup track on MusicBrainz API."""
     from .utils import strip_all_bracketed
     term = strip_all_bracketed(term or '').strip()
@@ -231,7 +231,7 @@ def _lookup_musicbrainz(term: str, artist: Optional[str] = None, title: Optional
     return None, None
 
 
-def _lookup_bandcamp(term: str, artist: Optional[str] = None, title: Optional[str] = None):
+def _lookup_bandcamp(term: str):
     """Lookup track on Bandcamp via web search."""
     from .utils import strip_all_bracketed
     term = strip_all_bracketed(term or '').strip()
@@ -270,7 +270,7 @@ def _lookup_bandcamp(term: str, artist: Optional[str] = None, title: Optional[st
     return None, None
 
 
-def _lookup_deezer(term: str, artist: Optional[str] = None, title: Optional[str] = None):
+def _lookup_deezer(term: str):
     """Lookup track on Deezer API."""
     from .utils import strip_all_bracketed
     term = strip_all_bracketed(term or '').strip()
@@ -320,7 +320,7 @@ def _lookup_soundcloud(search_term: str, artist: Optional[str] = None, title: Op
         return None, None
 
     artist_name, track_name = (artist or '').strip(), (title or '').strip()
-    if not track_name:
+    if not (artist_name and track_name):
         artist_name, track_name = extract_metadata_from_filename(search_term)
     if not track_name:
         return None, None
@@ -345,15 +345,25 @@ def _lookup_soundcloud(search_term: str, artist: Optional[str] = None, title: Op
     return None, None
 
 
-# All lookups share the signature (search_term, artist=None, title=None) so
-# lookup_online_metadata can hand over known artist/title parts; only SoundCloud
-# uses them, the others keep working on the combined search term.
+def _single_arg(func):
+    """Adapt a search-term-only lookup to the (term, artist, title) dispatch signature.
+
+    Only SoundCloud can use the known artist/title parts; the other sources search
+    by the combined term and would just rebind the parameter names to their own
+    API response, silently shadowing them.
+    """
+    def wrapper(term, artist=None, title=None):
+        return func(term)
+    return wrapper
+
+
+# Every entry is callable as (search_term, artist, title).
 METADATA_SOURCE_DISPATCH = {
-    'itunes': ('iTunes', _lookup_itunes),
-    'deezer': ('Deezer', _lookup_deezer),
-    'bandcamp': ('Bandcamp', _lookup_bandcamp),
+    'itunes': ('iTunes', _single_arg(_lookup_itunes)),
+    'deezer': ('Deezer', _single_arg(_lookup_deezer)),
+    'bandcamp': ('Bandcamp', _single_arg(_lookup_bandcamp)),
     'soundcloud': ('SoundCloud', _lookup_soundcloud),
-    'musicbrainz': ('MusicBrainz', _lookup_musicbrainz),
+    'musicbrainz': ('MusicBrainz', _single_arg(_lookup_musicbrainz)),
 }
 
 
@@ -376,16 +386,15 @@ def lookup_online_metadata(base_name: str, sources: Optional[list] = None,
             'itunes', 'deezer', 'bandcamp', 'soundcloud', 'musicbrainz'
         ])
     
+    # Only SoundCloud can use the parts directly; for every other source the
+    # adapter drops them, so the parts are passed on every call.
     for source_name in sources:
         source_entry = METADATA_SOURCE_DISPATCH.get(source_name.lower())
         if not source_entry:
             logger.warning(f"  Unknown metadata source: {source_name}")
             continue
         label, func = source_entry
-        if artist and title:
-            found_artist, found_title = func(base_name, artist, title)
-        else:
-            found_artist, found_title = func(base_name)
+        found_artist, found_title = func(base_name, artist, title)
         if found_artist and found_title:
             logger.debug(f"  {label} found: {found_artist} - {found_title}")
             return found_artist, found_title
@@ -416,32 +425,33 @@ def extract_metadata_from_filename(filename: str) -> Tuple[str, str]:
     return '', name.strip()
 
 
-# Promotional/technical boilerplate that online titles add on top of the real
-# track name. Removed on both sides before comparing so it cannot dilute (or
-# fake) a match.
-_ONLINE_NOISE_TOKENS = {
-    'free', 'download', 'downloads', 'full', 'version', 'versions', 'official',
-    'audio', 'video', 'hd', 'hq', 'mp3', 'web', 'rip', 'preview', 'mv',
-    'promo', 'premiere', 'exclusive', 'stream', 'listen', 'lyrics', 'lyric',
-    'lyricvideo', 'out', 'now', 'new',
-}
+# Unbracketed promotional/technical boilerplate that online titles bolt onto the
+# real track name ("Nicaré FREE DOWNLOAD"). Stripped as whole phrases with word
+# boundaries, never as single words: "new", "out", "full", "version" and "web"
+# are ordinary track-title words, and dropping one of them would let two
+# different titles compare equal. Bracketed qualifiers — where nearly all real
+# boilerplate lives — are already removed by _comparable_words.
+_ONLINE_NOISE_PHRASES = (
+    'free download', 'free downloads', 'for free', 'out now',
+    'official video', 'official audio', 'lyric video', 'lyrics',
+    '320 kbps', '320kbps', 'mp3', 'wav',
+)
 
 
 def _comparable_words(text: str) -> set:
-    """Word set of ``text`` without brackets and promotional boilerplate."""
+    """Word set of ``text`` without bracketed qualifiers and boilerplate phrases."""
     import re
     from src.utils import strip_all_bracketed
-    cleaned = strip_all_bracketed(text or '')
-    return {
-        w for w in re.findall(r'\w+', cleaned.lower())
-        if w not in _ONLINE_NOISE_TOKENS
-    }
+    cleaned = strip_all_bracketed(text or '').lower()
+    for phrase in _ONLINE_NOISE_PHRASES:
+        cleaned = re.sub(rf'\b{re.escape(phrase)}\b', ' ', cleaned)
+    return set(re.findall(r'\w+', cleaned))
 
 
 # Minimum per-axis agreement before an online (artist, title) pair may replace
 # filename-derived metadata. Deliberately high: this step only confirms the
-# "Artist - Title" vs "Title - Artist" ordering, it must never adopt a
-# different track.
+# "Artist - Title" vs "Title - Artist" ordering, so a source that answers with a
+# different track must not be able to outscore the filename on both axes.
 _ORDERING_MATCH_THRESHOLD = 0.6
 
 
@@ -488,16 +498,25 @@ def resolve_artist_title_online(artist: str, title: str, config: Optional[Dict[s
     whose artist and title best match the filename parts.
 
     An online result is only adopted when **both** the artist and the title axis
-    really match the filename parts (``_ORDERING_MATCH_THRESHOLD``). A source that
-    answers with a different track — a common outcome, because artist names such as
-    "notdanilo" also occur inside unrelated titles — is rejected instead of
-    overwriting correct filename metadata.
+    agree with the filename parts by at least ``_ORDERING_MATCH_THRESHOLD``. A
+    source that answers with a different track — a common outcome, because artist
+    names such as "notdanilo" also occur inside unrelated titles — is rejected
+    instead of overwriting correct filename metadata.
+
+    Known limitation: the artist axis requires the online credit to be covered by
+    the filename part. SoundCloud reports the *uploader* as artist, so a remix
+    uploaded by the remixer scores 0.0 and the filename pair is kept. That fails
+    safe, but it means the reversed ordering is not corrected for such files.
 
     Returns the canonical (artist, title) from the best-matching source, or the input
     unchanged when no source returns a confident match.
     """
     if not artist or not title:
         return artist, title
+
+    sources = None
+    if config:
+        sources = config.get('metadata', {}).get('sources')
 
     candidates = [(artist.strip(), title.strip())]
     reversed_candidate = (title.strip(), artist.strip())
@@ -508,7 +527,8 @@ def resolve_artist_title_online(artist: str, title: str, config: Optional[Dict[s
     best = None
     for cand_artist, cand_title in candidates:
         online_artist, online_title = lookup_online_metadata(
-            f"{cand_artist} {cand_title}", artist=cand_artist, title=cand_title
+            f"{cand_artist} {cand_title}", sources=sources,
+            artist=cand_artist, title=cand_title,
         )
         if not online_artist or not online_title:
             continue
@@ -523,51 +543,6 @@ def resolve_artist_title_online(artist: str, title: str, config: Optional[Dict[s
     if best and best_score >= _ORDERING_MATCH_THRESHOLD:
         return best
     return artist, title
-
-
-def _is_valid_artist_handle(potential_artist: str, descriptive_terms: set) -> bool:
-    """Check if potential artist looks valid (not just descriptive text)."""
-    # Reject if it's all descriptive terms
-    words = potential_artist.lower().split()
-    if words and all(w in descriptive_terms for w in words):
-        return False
-    # Reject if too short
-    if len(potential_artist) < 2:
-        return False
-    return True
-
-
-def _parse_separators(name: str, descriptive_terms: set) -> Tuple[Optional[str], Optional[str]]:
-    """Try to split name by various separators."""
-    # Try various separators
-    for sep in [' - ', '-', '|', '/', '::']:
-        if sep in name:
-            parts = name.split(sep, 1)
-            artist = parts[0].strip()
-            title = parts[1].strip()
-            if _is_valid_artist_handle(artist, descriptive_terms):
-                return artist, title
-    return None, None
-
-
-def _looks_like_track_number(text: str) -> bool:
-    """Check if text looks like a track number."""
-    return bool(re.match(r'^\d{1,3}\.?[\s\-]?', text.strip()))
-
-
-def _is_valid_filename_part(text: str, descriptive_terms: set) -> bool:
-    """Check if a filename part looks like valid content."""
-    text_lower = text.lower()
-    # Skip if it's just descriptive terms
-    if text_lower in descriptive_terms:
-        return False
-    # Skip track numbers
-    if _looks_like_track_number(text):
-        return False
-    # Skip if too short
-    if len(text.strip()) < 2:
-        return False
-    return True
 
 
 _label_cache = {}

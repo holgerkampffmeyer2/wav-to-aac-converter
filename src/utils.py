@@ -43,8 +43,6 @@ SOUNDCLOUD_CLIENT_ID: str = _env.get('SOUNDCLOUD_CLIENT_ID', '')
 # === Regex Patterns ===
 OG_IMAGE_RE = re.compile(r'"og:image"\s+content="([^"]+)"')
 BANDCAMP_URL_RE = re.compile(r'https?://[^\s"\'<>]*\.bandcamp\.com/(?:track|album)/[^\s"\'<>]*')
-NON_WORD_RE = re.compile(r'[^\w]')
-MULTI_DASH_RE = re.compile(r'-+')
 BRACKET_CLEANUP_RE = re.compile(r'\([^)]*\)|\[[^\]]*\]')
 # SoundCloud artwork size tokens that are worth upgrading to t500x500.
 ARTWORK_SIZE_RE = re.compile(r'-(?:large|t67x67|crop)\.(jpg|png)$', re.IGNORECASE)
@@ -63,8 +61,7 @@ COVER_DIMENSIONS = 600              # Cover art resize dimensions
 # === Timeouts (seconds) ===
 DEFAULT_TIMEOUT = 15               # fetch_url default
 SEARCH_TIMEOUT = 10                # API search timeouts
-ENCODE_TIMEOUT = 600               # FFmpeg encoding timeout
-LOUDNESS_TIMEOUT = 120             # Loudness analysis timeout
+ENCODE_TIMEOUT = 600               # FFmpeg encoding timeout (also used for loudness analysis)
 
 # === Retry Settings ===
 RETRY_ATTEMPTS = 3                  # Default retry attempts
@@ -78,20 +75,6 @@ MUSICBRAINZ_COVER_URL = "https://coverartarchive.org/release/"
 BANDCAMP_SEARCH_URL = "https://bandcamp.com/search?q="
 ITUNES_SEARCH_URL = "https://itunes.apple.com/search?term="
 MUSICBRAINZ_LOOKUP_URL = "https://musicbrainz.org/ws/2/recording/?query="
-
-# === Exception Classes ===
-class NetworkError(Exception):
-    """Network-related errors."""
-    pass
-
-class CoverSearchError(Exception):
-    """Cover art search failures."""
-    pass
-
-class EncodingError(Exception):
-    """Audio encoding failures."""
-    pass
-
 
 def shq(s: str) -> str:
     """Shell-quote a string so it is safe to interpolate into shell=True commands.
