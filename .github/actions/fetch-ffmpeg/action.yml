@@ -12,7 +12,7 @@ inputs:
     description: Fail if the download is smaller than this (catches error pages and truncated responses)
     required: true
   checksum-url:
-    description: Optional URL returning an md5sum line for the download
+    description: URL returning an md5sum line for the download; omit if the source publishes none
     required: false
     default: ''
 

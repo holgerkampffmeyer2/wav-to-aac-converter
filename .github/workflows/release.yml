@@ -47,52 +47,8 @@ jobs:
           name: linux-amd64
           path: dist/audioconvert-linux-amd64.tar.gz
 
-  build-macos:
-    runs-on: macos-latest
-    strategy:
-      matrix:
-        arch: [arm64, x86_64]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-
-      - name: Install dependencies
-        run: pip install pyinstaller
-
-      - name: Download ffmpeg (static)
-        env:
-          FFMPEG_URL: ${{ matrix.arch == 'arm64' && 'https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip' || 'https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip?arch=x86_64' }}
-        uses: ./.github/actions/fetch-ffmpeg
-        with:
-          url: ${{ env.FFMPEG_URL }}
-          output: ffmpeg.zip
-          min-bytes: 10000000
-
-      - name: Extract ffmpeg
-        run: |
-          set -euo pipefail
-          unzip ffmpeg.zip -d pyinstaller/
-          chmod +x pyinstaller/ffmpeg
-
-      - name: Build binary
-        run: pyinstaller pyinstaller/convert.spec
-
-      - name: Create archive
-        run: |
-          cd dist/audioconvert
-          tar czf ../audioconvert-macos-${{ matrix.arch }}.tar.gz *
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-${{ matrix.arch }}
-          path: dist/audioconvert-macos-${{ matrix.arch }}.tar.gz
-
   release:
-    needs: [build-linux, build-macos]
+    needs: [build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -104,8 +60,6 @@ jobs:
         with:
           files: |
             linux-amd64/audioconvert-linux-amd64.tar.gz
-            macos-arm64/audioconvert-macos-arm64.tar.gz
-            macos-x86_64/audioconvert-macos-x86_64.tar.gz
           generate_release_notes: true
           draft: false
           prerelease: false

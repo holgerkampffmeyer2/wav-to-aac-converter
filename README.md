@@ -16,7 +16,7 @@ WAV/AIFF/FLAC to MP3/M4A conversion with loudness normalization, metadata extrac
 curl -fsSL https://raw.githubusercontent.com/holgerkampffmeyer2/wav-to-aac-converter/main/install.sh | bash
 ```
 
-Detects your platform (Linux/macOS), downloads the matching binary with bundled ffmpeg, and installs to `/usr/local/bin`.
+Detects your platform (Linux amd64), downloads the binary with bundled ffmpeg, and installs to `/usr/local/bin`.
 
 Custom install directory:
 ```bash
@@ -79,7 +79,8 @@ The converter can be configured using a `config.json` file in the same directory
     "sources": ["soundcloud", "itunes", "deezer", "bandcamp", "musicbrainz"],
     "fallback_to_filename": true,
     "enrich_tags": ["label", "genre", "album", "year", "track_number"],
-    "label_source_tag": "label"
+    "label_source_tag": "label",
+    "soundcloud_pages": 2
   }
 }
 ```
@@ -98,6 +99,7 @@ The converter can be configured using a `config.json` file in the same directory
 - `metadata.fallback_to_filename`: Fallback to filename parsing if no metadata found (default: true)
 - `metadata.enrich_tags`: Tags to write when enriching (default: label, genre, album, year, track_number)
 - `metadata.label_source_tag`: Tag name for label (default: label)
+- `metadata.soundcloud_pages`: How many result pages to request per SoundCloud query (default: 2). Raise it if the right track is often missed; lower it to speed up batches.
 - `soundcloud_confidence_threshold`: Minimum confidence score (0.0-1.0) for SoundCloud web search results (default: 0.6)
 - `loudness.mode`: Loudness mode - `fast` (single pass + reserve gain, default), `verify` (measure output true peak and re-encode until within target), `off` (legacy gain only)
 - `loudness.target_tp`: Target output true peak in dBTP (default: -0.5)
@@ -212,7 +214,7 @@ SOUNDCLOUD_CLIENT_ID=your_client_id_here
 
 The `.env` file is loaded automatically and listed in `.gitignore` to prevent accidentally committing your client ID.
 
-Without a valid client ID, SoundCloud search is skipped. The converter validates the client ID at startup and logs a warning with remediation steps if it is invalid or expired.
+Without a valid client ID, SoundCloud search is skipped. At startup the converter probes the configured ID with a lightweight API call and, if it is set but invalid or expired, logs a warning with remediation steps. A *missing* ID is not a startup error: it is reported when the first SoundCloud search is attempted, and the remaining sources still run. The probe is skipped entirely in `--offline` and `--no-metadata` mode.
 
 ## Prerequisites
 
@@ -237,7 +239,7 @@ sudo apt install ffmpeg python3
 ## Cover Artwork Strategy
 
 1. **Source file**: Extract embedded cover from source (WAV/FLAC/AIFF)
-2. **Local folder**: Look for `cover.png`, `cover.jpg`, exact filename match, or a normalized substring match (e.g. `Mix194.png` matches `DJ Hulk - Mix194 - Afrohouse.wav`; longest match wins, min 3 chars). No fallback to arbitrary images in the folder.
+2. **Local folder**: Look for `cover.png`/`cover.jpg`/`cover.jpeg`, exact filename match, or a normalized substring match (e.g. `Mix194.png` matches `DJ Hulk - Mix194 - Afrohouse.wav`; longest match wins, min 3 chars). No fallback to arbitrary images in the folder.
 3. **Online search**: Configurable order via `metadata.sources` (default: SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz, skipped in `--offline` mode)
 
 Remixes: a bracketed remixer in the filename (e.g. `ACTIN' TOUGH (LXRENZ REMIX)`) is extracted as a hint. SoundCloud queries then include the uploader handle and candidates are scored by uploader/remix-marker agreement — the actual remix (uploaded by the remixer handle) wins over the plain original release. SoundCloud returns the highest-confidence validated result **that has artwork**.

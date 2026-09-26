@@ -7,17 +7,10 @@ INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
 # Detect platform
 OS="$(uname -s)"
-ARCH="$(uname -m)"
 
 case "$OS" in
     Linux)  PLATFORM="linux-amd64" ;;
-    Darwin)
-        case "$ARCH" in
-            arm64) PLATFORM="macos-arm64" ;;
-            *)     PLATFORM="macos-x86_64" ;;
-        esac
-        ;;
-    *) echo "Error: Unsupported OS: $OS"; exit 1 ;;
+    *) echo "Error: Unsupported OS: $OS (only Linux amd64 is provided)"; exit 1 ;;
 esac
 
 ARCHIVE="${BINARY_NAME}-${PLATFORM}.tar.gz"

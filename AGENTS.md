@@ -91,7 +91,7 @@ When `metadata.enabled` is true (default), missing tags are written to the WAV f
 
 ### Cover Artwork Strategy
 1. **Source file**: Extract embedded cover from source (WAV/FLAC/AIFF)
-2. **Local folder**: Look for `cover.png`, `cover.jpg`, exact filename match, or a normalized substring match (e.g. `Mix194.png` matches `DJ Hulk - Mix194 - Afrohouse.wav`; longest match wins, min 3 chars). No fallback to arbitrary images.
+2. **Local folder**: Look for `cover.png`/`cover.jpg`/`cover.jpeg`, exact filename match, or a normalized substring match (e.g. `Mix194.png` matches `DJ Hulk - Mix194 - Afrohouse.wav`; longest match wins, min 3 chars). No fallback to arbitrary images.
 3. **Web search**: Configurable via `metadata.sources` (default: SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz, skipped in `--offline` mode)
 
 SoundCloud cover search uses the **SoundCloud API v2** (via `api-v2.soundcloud.com`) with **confidence scoring**. A `SOUNDCLOUD_CLIENT_ID` must be set in `.env`. Results below `soundcloud_confidence_threshold` (default: 0.6) are rejected and the next source is tried.
@@ -165,6 +165,7 @@ sudo apt install ffmpeg python3
 - **Codecs**: MP3 (libmp3lame) or M4A/AAC, 320kbps
 - **Loudness**: `loudness` block in `config.json`. `mode` (`fast` default, `verify`, `off`), `target_tp` (-0.5), `max_retries` (2), `risk_threshold_db` (-2.0), `reserve_aac_db` (2.5), `reserve_mp3_db` (1.5). `fast`: single pass; sources with true peak above the risk threshold get a codec-specific reserve gain, and a warning is logged if a follow-up `verify` run is advised. `verify`: measures the output true peak and re-encodes (up to `max_retries`) until ≤ `target_tp`. `off`: legacy gain only (`min(0, -0.1 - input_tp)`), no clipping protection.
 - **Cover Sources**: Source (embedded) → Local folder (exact or substring match) → SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz
+- **SoundCloud Depth**: `metadata.soundcloud_pages` (default 2) result pages per query. Raise it if the intended track is often missed; lower it to speed up large batches.
 - **Retry Logic**: 3 attempts with exponential backoff
 - **Metadata Sources**: Source tags → SoundCloud → iTunes → Deezer → Bandcamp → MusicBrainz → filename parsing (order configurable via `metadata.sources`)
 - **Enrichment Tags**: label, genre, album, year, track_number (if metadata enabled)
@@ -216,9 +217,15 @@ To create a new release:
    ```
 
 This triggers the GitHub Actions `release.yml` workflow which:
-- Builds standalone binaries for Linux (amd64) and macOS (arm64, x86_64)
-- Bundles static ffmpeg in each binary
-- Creates a GitHub Release with all 3 archives
+- Builds a standalone binary for Linux (amd64)
+- Bundles a static ffmpeg (downloaded via `.github/actions/fetch-ffmpeg`, which verifies size and md5)
+- Creates a GitHub Release with that archive
+
+There is no macOS build: evermeet.cx ignores the `arch` query parameter and
+serves the same x86_64 binary for every request, so the former
+`audioconvert-macos-arm64.tar.gz` was a mislabelled x86_64 build that only ran
+on Apple Silicon under Rosetta. macOS users install from source
+(`pip install -e .`) with a system ffmpeg.
 
 The version is defined only in `src/__init__.py`. `pyproject.toml` reads it dynamically via `[tool.setuptools.dynamic]`.
 
