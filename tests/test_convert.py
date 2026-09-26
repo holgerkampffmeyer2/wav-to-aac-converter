@@ -946,12 +946,12 @@ class TestIntegration(unittest.TestCase):
                 except:
                     pass
 
-    @patch('src.audio_processing.download_cover')
-    @patch('src.audio_processing.encode_audio')
-    @patch('src.audio_processing.embed_cover')
+    @patch('src.convert.download_cover')
+    @patch('src.convert.encode_audio')
+    @patch('src.convert.audio_embed_cover')
     @patch('src.convert.verify_output')
     @patch('src.metadata.lookup_online_metadata')
-    @patch('src.audio_processing.analyze_loudness')
+    @patch('src.convert.analyze_loudness')
     def test_integration_conversion_with_mocked_online(self, mock_loudness, mock_lookup, mock_verify, mock_embed, mock_encode, mock_download):
         output_file = None
         try:
@@ -990,12 +990,12 @@ class TestIntegration(unittest.TestCase):
                 except:
                     pass
 
-    @patch('src.audio_processing.download_cover')
-    @patch('src.audio_processing.encode_audio')
-    @patch('src.audio_processing.embed_cover')
+    @patch('src.convert.download_cover')
+    @patch('src.convert.encode_audio')
+    @patch('src.convert.audio_embed_cover')
     @patch('src.convert.verify_output')
     @patch('src.metadata.lookup_online_metadata')
-    @patch('src.audio_processing.analyze_loudness')
+    @patch('src.convert.analyze_loudness')
     def test_integration_conversion_m4a_with_mocked_online(self, mock_loudness, mock_lookup, mock_verify, mock_embed, mock_encode, mock_download):
         output_file = None
         try:
@@ -1033,12 +1033,12 @@ class TestIntegration(unittest.TestCase):
                 except:
                     pass
 
-    @patch('src.audio_processing.download_cover')
-    @patch('src.audio_processing.encode_audio')
-    @patch('src.audio_processing.embed_cover')
+    @patch('src.convert.download_cover')
+    @patch('src.convert.encode_audio')
+    @patch('src.convert.audio_embed_cover')
     @patch('src.convert.verify_output')
     @patch('src.metadata.lookup_online_metadata')
-    @patch('src.audio_processing.analyze_loudness')
+    @patch('src.convert.analyze_loudness')
     def test_output_written_next_to_source_not_cwd(self, mock_loudness, mock_lookup, mock_verify, mock_embed, mock_encode, mock_download):
         # Ensure output is written to the source directory even when cwd is different
         original_cwd = os.getcwd()
