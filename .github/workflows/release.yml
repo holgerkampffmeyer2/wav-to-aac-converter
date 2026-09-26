@@ -6,7 +6,24 @@ on:
       - 'v*'
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: pip install pytest pytest-cov
+      - name: Run tests
+        run: |
+          python -m pytest tests/test_convert.py -q \
+            --deselect tests/test_convert.py::TestIntegration::test_integration_conversion_with_mocked_online \
+            --deselect tests/test_convert.py::TestIntegration::test_integration_conversion_m4a_with_mocked_online
+
   build-linux:
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
