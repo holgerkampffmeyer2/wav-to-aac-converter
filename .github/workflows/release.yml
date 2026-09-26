@@ -19,8 +19,16 @@ jobs:
         run: pip install pyinstaller
 
       - name: Download ffmpeg (static)
+        uses: ./.github/actions/fetch-ffmpeg
+        with:
+          url: https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+          output: ffmpeg.tar.xz
+          checksum-url: https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz.md5
+          min-bytes: 20000000
+
+      - name: Extract ffmpeg
         run: |
-          curl -L -o ffmpeg.tar.xz https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
+          set -euo pipefail
           tar xf ffmpeg.tar.xz
           cp ffmpeg-*-static/ffmpeg pyinstaller/ffmpeg
           chmod +x pyinstaller/ffmpeg
@@ -55,12 +63,17 @@ jobs:
         run: pip install pyinstaller
 
       - name: Download ffmpeg (static)
+        env:
+          FFMPEG_URL: ${{ matrix.arch == 'arm64' && 'https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip' || 'https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip?arch=x86_64' }}
+        uses: ./.github/actions/fetch-ffmpeg
+        with:
+          url: ${{ env.FFMPEG_URL }}
+          output: ffmpeg.zip
+          min-bytes: 10000000
+
+      - name: Extract ffmpeg
         run: |
-          if [ "${{ matrix.arch }}" = "arm64" ]; then
-            curl -L -o ffmpeg.zip https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip
-          else
-            curl -L -o ffmpeg.zip https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip?arch=x86_64
-          fi
+          set -euo pipefail
           unzip ffmpeg.zip -d pyinstaller/
           chmod +x pyinstaller/ffmpeg
 

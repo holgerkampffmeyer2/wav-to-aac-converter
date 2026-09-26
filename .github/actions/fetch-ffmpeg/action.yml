@@ -1,0 +1,52 @@
+name: Fetch ffmpeg
+description: Download a static ffmpeg build and refuse to continue if the download is not intact
+
+inputs:
+  url:
+    description: Download URL
+    required: true
+  output:
+    description: Path to write the download to
+    required: true
+  min-bytes:
+    description: Fail if the download is smaller than this (catches error pages and truncated responses)
+    required: true
+  checksum-url:
+    description: Optional URL returning an md5sum line for the download
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Download
+      shell: bash
+      run: |
+        set -euo pipefail
+        curl -fL --retry 3 --retry-delay 5 --retry-connrefused \
+          -o "${{ inputs.output }}" "${{ inputs.url }}"
+
+    - name: Verify size
+      shell: bash
+      run: |
+        set -euo pipefail
+        size=$(wc -c < "${{ inputs.output }}")
+        if [ "$size" -lt "${{ inputs.min-bytes }}" ]; then
+          echo "::error::${{ inputs.output }} is only ${size} bytes, expected at least ${{ inputs.min-bytes }}. Refusing to build from it — this is usually an error page or a truncated response."
+          exit 1
+        fi
+        echo "size ok: ${size} bytes"
+
+    - name: Verify checksum
+      if: inputs.checksum-url != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        curl -fL -o expected.md5 "${{ inputs.checksum-url }}"
+        expected=$(awk '{print $1}' expected.md5)
+        actual=$(md5sum "${{ inputs.output }}" | awk '{print $1}')
+        if [ "$expected" != "$actual" ]; then
+          echo "::error::md5 mismatch for ${{ inputs.output }}: expected ${expected}, got ${actual}"
+          exit 1
+        fi
+        echo "md5 ok: ${actual}"
