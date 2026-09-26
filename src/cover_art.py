@@ -241,10 +241,7 @@ def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any]
         extract_metadata,
         lookup_online_metadata,
         extract_metadata_from_filename,
-        enrich_file_metadata,
-        lookup_label_online,
-        get_genre_online,
-        get_additional_metadata_online
+        enrich_file_metadata
     )
     from .audio_processing import find_local_cover, run_cmd as audio_run_cmd
     from pathlib import Path
@@ -358,7 +355,7 @@ def _find_cover(wav_path: str, artist: str, title: str, original_wav_path: str =
         - URL string (http://...) for online download
         - None if no cover
     """
-    from .audio_processing import find_local_cover, run_cmd as audio_run_cmd, download_cover
+    from .audio_processing import find_local_cover, run_cmd as audio_run_cmd
     from pathlib import Path
     
     if config is None:

@@ -503,7 +503,10 @@ def search_soundcloud_api(query: str, limit: int = 20, pages: Optional[int] = No
         return []
 
     if pages is None:
-        pages = load_config().get('metadata', {}).get('soundcloud_pages', 2)
+        # An explicit null in config.json must not turn into a TypeError in the
+        # max() below. 0 stays 0 and is raised to 1 page by that max().
+        configured: Optional[int] = load_config().get('metadata', {}).get('soundcloud_pages')
+        pages = 2 if configured is None else configured
 
     url = (f"https://api-v2.soundcloud.com/search/tracks"
            f"?q={quote(query)}&client_id={SOUNDCLOUD_CLIENT_ID}&limit={limit}")

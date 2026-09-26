@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Audio processing functions (FFmpeg, encoding, loudness) for wav-to-aac-converter."""
 
-import subprocess
 import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
@@ -11,8 +10,7 @@ from src.utils import (
     DEFAULT_BITRATE,
     COVER_DIMENSIONS,
     run_cmd as util_run_cmd,
-    shq,
-    to_ascii_filename
+    shq
 )
 
 logger = logging.getLogger(__name__)

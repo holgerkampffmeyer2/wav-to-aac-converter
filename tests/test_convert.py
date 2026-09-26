@@ -830,6 +830,36 @@ class TestOnlineMetadataLookup(unittest.TestCase):
         self.assertIsNone(artist)
         self.assertIsNone(title)
 
+    @patch('src.utils.fetch_url')
+    def test_lookup_online_metadata_null_sources_falls_back(self, mock_fetch):
+        """An explicit "sources": null must not iterate None.
+
+        Regression: .get('sources', [...]) only substitutes for a *missing*
+        key, so a null in config.json reached the for-loop and raised
+        TypeError: 'NoneType' is not iterable.
+        """
+        import json
+        mock_fetch.return_value = json.dumps({
+            "resultCount": 1,
+            "results": [{"trackName": "Song", "artistName": "Artist"}]
+        })
+        with patch('src.metadata.load_config',
+                   return_value={'metadata': {'sources': None}}):
+            artist, title = lookup_online_metadata("Song")
+        self.assertEqual(artist, "Artist")
+        self.assertEqual(title, "Song")
+
+    @patch('src.utils.fetch_url')
+    def test_lookup_online_metadata_empty_sources_stays_empty(self, mock_fetch):
+        """An explicit empty list means "no sources" and is not overwritten."""
+        mock_fetch.return_value = ""
+        with patch('src.metadata.load_config',
+                   return_value={'metadata': {'sources': []}}):
+            artist, title = lookup_online_metadata("Song")
+        self.assertIsNone(artist)
+        self.assertIsNone(title)
+        mock_fetch.assert_not_called()
+
 
 class TestIntegration(unittest.TestCase):
     """Integration tests for the conversion process."""
@@ -2488,6 +2518,21 @@ class TestSoundcloudApiPagination(unittest.TestCase):
                 search_soundcloud_api('q')
         url = mock_fetch.call_args[0][0]
         self.assertIn('limit=20', url)
+
+    @patch('src.utils.fetch_url')
+    def test_null_soundcloud_pages_does_not_crash(self, mock_fetch):
+        """An explicit "soundcloud_pages": null must not reach max().
+
+        Regression: .get('soundcloud_pages', 2) only substitutes for a
+        *missing* key, so a null in config.json raised TypeError: '>' not
+        supported between instances of 'NoneType' and 'int'.
+        """
+        mock_fetch.return_value = '{"collection": [], "next_href": ""}'
+        with patch('src.utils.SOUNDCLOUD_CLIENT_ID', 'test-id'):
+            with patch('src.utils.load_config',
+                       return_value={'metadata': {'soundcloud_pages': None}}):
+                from src.utils import search_soundcloud_api
+                self.assertEqual(search_soundcloud_api('q'), [])
 
 
 class TestSoundcloudUploaderScoring(unittest.TestCase):

@@ -15,7 +15,6 @@ from src.utils import (
     MUSICBRAINZ_LOOKUP_URL,
     run_cmd as util_run_cmd,
     shq,
-    to_ascii_filename,
     load_config
 )
 
@@ -382,9 +381,11 @@ def lookup_online_metadata(base_name: str, sources: Optional[list] = None,
         (artist, title) tuple or (None, None)
     """
     if sources is None:
-        sources = load_config().get('metadata', {}).get('sources', [
-            'itunes', 'deezer', 'bandcamp', 'soundcloud', 'musicbrainz'
-        ])
+        # An explicit null in config.json must not turn into a TypeError below,
+        # but an explicit empty list means "no online sources" and is kept.
+        configured: Optional[list] = load_config().get('metadata', {}).get('sources')
+        sources = ['itunes', 'deezer', 'bandcamp', 'soundcloud', 'musicbrainz'] \
+            if configured is None else configured
     
     # Only SoundCloud can use the parts directly; for every other source the
     # adapter drops them, so the parts are passed on every call.

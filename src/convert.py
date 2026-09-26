@@ -22,12 +22,6 @@ from .utils import (
     to_ascii_filename,
     clean_title_for_search,
     validate_soundcloud_client_id,
-    DEFAULT_TIMEOUT,
-    DEFAULT_BITRATE,
-    ENCODE_TIMEOUT,
-    RETRY_ATTEMPTS,
-    SEARCH_TIMEOUT,
-    fetch_url,
     run_cmd
 )
 
@@ -35,25 +29,20 @@ from .audio_processing import (
     analyze_loudness,
     measure_output_true_peak,
     encode_audio,
-    process_cover,
     embed_cover as audio_embed_cover,
     find_local_cover,
     download_cover,
-    run_cmd as audio_run_cmd
 )
 
 from .metadata import (
     extract_metadata,
-    lookup_online_metadata,
     extract_metadata_from_filename,
-    run_cmd as metadata_run_cmd
 )
 
 from .cover_art import (
     search_deezer_cover,
     search_musicbrainz_cover,
     search_bandcamp_cover,
-    search_all_sources,
     enrich_and_search_cover
 )
 
