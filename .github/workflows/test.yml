@@ -25,6 +25,7 @@ jobs:
 
       - name: Run tests (skip ffmpeg-dependent tests)
         run: |
-          python -m pytest tests/test_convert.py -v \
+          python -m pytest tests/test_convert.py -v --tb=long \
             --deselect tests/test_convert.py::TestIntegration::test_integration_conversion_with_mocked_online \
-            --deselect tests/test_convert.py::TestIntegration::test_integration_conversion_m4a_with_mocked_online
+            --deselect tests/test_convert.py::TestIntegration::test_integration_conversion_m4a_with_mocked_online \
+            2>&1 | head -200
