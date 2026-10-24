@@ -3025,3 +3025,72 @@ class TestComputeLoudnessGain(unittest.TestCase):
         gain, risk = compute_loudness_gain(-0.5, 'mp3', dict(self.CONFIG), 'off')
         self.assertTrue(risk)
         self.assertAlmostEqual(gain, 0.0, places=3)
+
+
+class TestSoundCloudCoverSearchRegressions(unittest.TestCase):
+    """Regression tests for SoundCloud cover lookup using real-like patterns."""
+
+    def setUp(self):
+        from src import utils
+        self.orig_client_id = getattr(utils, 'SOUNDCLOUD_CLIENT_ID', '')
+        utils.SOUNDCLOUD_CLIENT_ID = 'test'
+
+    def tearDown(self):
+        from src import utils
+        utils.SOUNDCLOUD_CLIENT_ID = self.orig_client_id
+
+    @patch('src.cover_art.get_soundcloud_result_cached')
+    @patch('src.cover_art.try_soundcloud_api_result')
+    @patch('src.cover_art.search_soundcloud_api')
+    @patch('src.cover_art.build_soundcloud_queries')
+    @patch('src.cover_art.load_config')
+    def test_cover_for_artist_title_with_original_mix_suffix(self, mock_load_config,
+                                                              mock_build_queries,
+                                                              mock_search_api,
+                                                              mock_try_result,
+                                                              mock_cache):
+        """Original Mix suffix should not prevent finding cover when uploader matches artist."""
+        from src import cover_art
+        mock_cache.return_value = None
+        mock_load_config.return_value = {'soundcloud_confidence_threshold': 0.6}
+        mock_build_queries.return_value = ['David Valero At Night', 'At Night']
+        mock_search_api.return_value = [{'title': 'David Valero - At Night (Original Mix)',
+                                         'user': {'username': 'David Valero'},
+                                         'artwork_url': 'https://i1.sndcdn.com/artworks-xxx-large.jpg',
+                                         'permalink_url': 'https://soundcloud.com/davidvalerodj/david-valero-at-night-original'}]
+        mock_try_result.return_value = {'title': 'David Valero - At Night (Original Mix)',
+                                        'artist': 'David Valero',
+                                        'thumbnail': 'https://i1.sndcdn.com/artworks-xxx-t500x500.jpg',
+                                        'url': 'https://soundcloud.com/davidvalerodj/david-valero-at-night-original',
+                                        'confidence': 1.0}
+        url = cover_art.search_soundcloud_cover('David Valero', 'At Night (Original Mix)')
+        self.assertIsNotNone(url)
+        self.assertIn('t500x500', url)
+
+    @patch('src.cover_art.get_soundcloud_result_cached')
+    @patch('src.cover_art.try_soundcloud_api_result')
+    @patch('src.cover_art.search_soundcloud_api')
+    @patch('src.cover_art.build_soundcloud_queries')
+    @patch('src.cover_art.load_config')
+    def test_cover_for_collab_artist_with_edit_suffix(self, mock_load_config,
+                                                      mock_build_queries,
+                                                      mock_search_api,
+                                                      mock_try_result,
+                                                      mock_cache):
+        """Collaborative artists with Edit suffix should find cover when uploader is one of collaborators."""
+        from src import cover_art
+        mock_cache.return_value = None
+        mock_load_config.return_value = {'soundcloud_confidence_threshold': 0.6}
+        mock_build_queries.return_value = ['Minow Bautista Gama The Weekend', 'The Weekend']
+        mock_search_api.return_value = [{'title': 'Michael Gray - The Weekend - Minow, Bautista, Gama Edit',
+                                         'user': {'username': 'Minow'},
+                                         'artwork_url': 'https://i1.sndcdn.com/artworks-yyy-large.jpg',
+                                         'permalink_url': 'https://soundcloud.com/minow-1/michael-gray-the-weekend-minow'}]
+        mock_try_result.return_value = {'title': 'Michael Gray - The Weekend - Minow, Bautista, Gama Edit',
+                                        'artist': 'Minow',
+                                        'thumbnail': 'https://i1.sndcdn.com/artworks-yyy-t500x500.jpg',
+                                        'url': 'https://soundcloud.com/minow-1/michael-gray-the-weekend-minow',
+                                        'confidence': 1.0}
+        url = cover_art.search_soundcloud_cover('Minow, Bautista, Gama', 'Minow, Bautista, Gama - The Weekend (Edit)')
+        self.assertIsNotNone(url)
+        self.assertIn('t500x500', url)

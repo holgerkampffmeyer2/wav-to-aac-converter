@@ -274,3 +274,8 @@ wav-to-aac-converter/
 ├── *.wav / *.flac         # Source files
 └── *.mp3 / *.m4a        # Converted output
 ```
+## Search Logic Principles
+
+- **No per-track workarounds**: Never hardcode specific track names, artist names, URLs, or slugs. When new failing examples are provided, analyze the existing logic and improve it in a general/robust way (e.g. query building, normalization, confidence scoring, source ordering) instead of adding special cases.
+- **Generalize fixes**: Improvements must apply to classes of cases, not individual songs.
+- **SoundCloud requires auth**: SoundCloud lookup is only used if `SOUNDCLOUD_CLIENT_ID` is set. If missing, skip entirely with no ad-hoc resolve/URL guessing.

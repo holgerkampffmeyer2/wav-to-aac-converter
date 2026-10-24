@@ -394,6 +394,12 @@ def _soundcloud_confidence(expected_artist: str, expected_title: str,
     uploader_conf = _token_containment(expected_artist, uploader)
     if uploader_conf >= 0.5:
         return max(base, (base + uploader_conf) / 2)
+    # Penalize when uploader clearly doesn't match expected artist (label/channels)
+    # Only penalize if uploader has zero match AND expected artist has 3+ tokens
+    if uploader_conf == 0.0:
+        expected_tokens = len(re.findall(r'\w+', (expected_artist or '').lower()))
+        if expected_tokens >= 3:
+            base = max(0.0, base - 0.25)
     return max(0.0, min(1.0, base))
 
 

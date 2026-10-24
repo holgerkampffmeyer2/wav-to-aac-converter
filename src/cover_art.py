@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Cover art search functions for wav-to-aac-converter."""
 
+import re
 import json
 import logging
 from typing import Optional, Dict, Any, Tuple
@@ -150,13 +151,13 @@ def search_bandcamp_cover(artist: str, title: str) -> Optional[str]:
 
 
 def search_soundcloud_cover(artist: str, title: str) -> Optional[str]:
-    """Search SoundCloud for cover art via API v2 with confidence scoring.
-
-    Iterates all queries and returns the artwork of the highest-confidence
-    validated result. A remixer/uploader hint from the title disambiguates
-    remixes from plain original releases.
-    """
+    """Search SoundCloud for cover art via API v2 with confidence scoring."""
     if not artist and not title:
+        return None
+
+    from src.utils import SOUNDCLOUD_CLIENT_ID, ARTWORK_SIZE_RE
+    from urllib.parse import quote, urlsplit, urlunsplit
+    if not SOUNDCLOUD_CLIENT_ID:
         return None
 
     cached = get_soundcloud_result_cached(artist, title)
@@ -179,6 +180,65 @@ def search_soundcloud_cover(artist: str, title: str) -> Optional[str]:
     if best:
         logger.info(f"  SoundCloud cover found (confidence {best['confidence']:.2f})")
         return best['thumbnail']
+
+    # Generic fallback: try resolve with artist as handle
+    # This finds artist's own upload when search returns label/repost channels
+    artist_slug = re.sub(r'[^a-z0-9]+', '', (artist or '').lower())
+    title_slug = re.sub(r'[^a-z0-9]+', '-', (title or '').lower()).strip('-')
+    if artist_slug and title_slug:
+        # Build artist handle variations (generic)
+        # Split original artist name BEFORE slugifying to preserve separators
+        raw_artist_parts = re.split(r'[&\+\s]+', (artist or '').strip())
+        artist_handles = [artist_slug]
+        if raw_artist_parts:
+            first = re.sub(r'[^a-z0-9]+', '', raw_artist_parts[0].lower())
+            if first and first != artist_slug:
+                artist_handles.append(first)
+            if len(raw_artist_parts) > 1:
+                last = re.sub(r'[^a-z0-9]+', '', raw_artist_parts[-1].lower())
+                if last and last != artist_slug:
+                    artist_handles.append(last)
+            if first:
+                artist_handles.append(first + 'music')
+                artist_handles.append(first + 'official')
+        # Deduplicate
+        artist_handles = list(dict.fromkeys(artist_handles))
+
+        # Build title variations (generic - strip common suffixes)
+        title_variants = [title_slug]
+        # Strip year suffixes (e.g., "2026", "2025", etc.)
+        title_no_year = re.sub(r'-\d{4}$', '', title_slug)
+        if title_no_year != title_slug:
+            title_variants.append(title_no_year)
+        # Strip common version suffixes
+        for suffix in ['-edit', '-original', '-remix', '-mix', '-version']:
+            if title_slug.endswith(suffix):
+                title_variants.append(title_slug[:-len(suffix)])
+        title_variants = list(dict.fromkeys(title_variants))
+
+        candidates = []
+        for ah in artist_handles:
+            for tv in title_variants:
+                candidates.append(f"https://soundcloud.com/{ah}/{tv}")
+
+        for surl in candidates:
+            try:
+                parts = urlsplit(surl)
+                surl_clean = urlunsplit((parts.scheme, parts.netloc, parts.path, '', ''))
+                resolve_url = f"https://api-v2.soundcloud.com/resolve?url={quote(surl_clean)}&client_id={SOUNDCLOUD_CLIENT_ID}"
+                content = fetch_url(resolve_url)
+                if not content:
+                    continue
+                data = json.loads(content)
+                if isinstance(data, dict) and data.get('artwork_url'):
+                    artwork = data['artwork_url']
+                    upgraded = ARTWORK_SIZE_RE.sub(r'-t500x500.', artwork)
+                    if upgraded != artwork:
+                        artwork = upgraded
+                    logger.info(f"  SoundCloud cover found via artist resolve")
+                    return artwork
+            except Exception:
+                continue
     return None
 
 
