@@ -2017,24 +2017,6 @@ class TestErrorHandlingEdgeCases(unittest.TestCase):
             if os.path.exists(wav_path):
                 os.remove(wav_path)
 
-    def test_process_cover_failure(self):
-        """Test process_cover with failure."""
-        from src.audio_processing import process_cover
-        import tempfile
-        
-        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as f:
-            cover_path = f.name
-            input_path = f.name
-        
-        try:
-            with patch('src.audio_processing.run_cmd', return_value=(False, "", "error")):
-                result = process_cover(input_path, cover_path)
-                self.assertFalse(result)
-        finally:
-            import os
-            if os.path.exists(cover_path):
-                os.remove(cover_path)
-
     def test_embed_cover_invalid_format(self):
         """Test embed_cover with invalid format."""
         from src.audio_processing import embed_cover
@@ -2072,16 +2054,6 @@ class TestErrorHandlingEdgeCases(unittest.TestCase):
 
 class TestCoverArtAPIFunctions(unittest.TestCase):
     """Tests for cover art API functions."""
-
-    def test_search_all_sources_returns_tuple(self):
-        """Test search_all_sources returns expected tuple."""
-        from src.cover_art import search_all_sources
-        
-        with patch('src.cover_art.search_deezer_cover', return_value=None), \
-             patch('src.cover_art.search_musicbrainz_cover', return_value=None), \
-             patch('src.cover_art.search_bandcamp_cover', return_value=None):
-            metadata, cover = search_all_sources("Artist", "Title", "filename")
-            self.assertIsInstance(metadata, dict)
 
     def test_enrich_and_search_cover_online_lookup(self):
         """Test enrich_and_search_cover with online metadata enabled."""

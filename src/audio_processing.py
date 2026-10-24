@@ -9,16 +9,11 @@ from src.utils import (
     ENCODE_TIMEOUT,
     DEFAULT_BITRATE,
     COVER_DIMENSIONS,
-    run_cmd as util_run_cmd,
+    run_cmd,
     shq
 )
 
 logger = logging.getLogger(__name__)
-
-
-def run_cmd(cmd: str, capture_output: bool = True, timeout: int = ENCODE_TIMEOUT) -> Tuple[bool, str, str]:
-    """Run shell command and return output."""
-    return util_run_cmd(cmd, capture_output, timeout)
 
 
 def analyze_loudness(wav_path: str) -> Optional[Dict[str, Any]]:
@@ -77,13 +72,6 @@ def encode_audio(wav_path: str, output_path: str, metadata: Dict[str, Any], gain
     if not success:
         detail = (stderr or '').strip().splitlines()
         logger.error(f"  ffmpeg: {detail[-1]}" if detail else "  ffmpeg: no error output")
-    return success
-
-
-def process_cover(cover_path: str, output_path: str) -> bool:
-    """Process cover art to 600x600."""
-    cmd = f'ffmpeg -y -i {shq(cover_path)} -vf "scale={COVER_DIMENSIONS}:{COVER_DIMENSIONS}:force_original_aspect_ratio=decrease,pad={COVER_DIMENSIONS}:{COVER_DIMENSIONS}:(ow-iw)/2:(oh-ih)/2" -frames:v 1 -q:v 2 {shq(output_path)} 2>/dev/null'
-    success, _, _ = run_cmd(cmd)
     return success
 
 

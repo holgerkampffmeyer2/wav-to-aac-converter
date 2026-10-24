@@ -13,7 +13,7 @@ from functools import lru_cache
 from src.utils import (
     ITUNES_SEARCH_URL,
     MUSICBRAINZ_LOOKUP_URL,
-    run_cmd as util_run_cmd,
+    run_cmd,
     shq,
     load_config
 )
@@ -22,11 +22,6 @@ logger = logging.getLogger(__name__)
 
 # Alias for convenience
 quote = urllib.parse.quote
-
-
-def run_cmd(cmd: str, capture_output: bool = True, timeout: int = 600):
-    """Run shell command and return output."""
-    return util_run_cmd(cmd, capture_output, timeout)
 
 
 def _fuzzy_match(search_term: str, candidate: str, threshold: float = 0.8) -> bool:

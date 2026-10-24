@@ -125,6 +125,130 @@ def compute_loudness_gain(input_tp: float, fmt: str, config: Dict[str, Any],
     return gain_db, risk
 
 
+
+def _prepare_output_paths(wav_path: str, original_wav_path: str, fmt: str) -> Tuple[str, str, str, str]:
+    """Prepare output paths and temp file names."""
+    base_name = Path(wav_path).stem
+    out_dir = Path(original_wav_path).parent
+    output_name = str(out_dir / (base_name + f'.{fmt}'))
+    file_hash = hash(wav_path) % 1000000
+    temp_cover = str(out_dir / f'cover_{file_hash}.jpg')
+    temp_output = str(out_dir / f'output_{file_hash}.{fmt}')
+    return base_name, temp_cover, temp_output, output_name
+
+
+def _analyze_loudness_and_gain(wav_path: str, fmt: str, config: Dict[str, Any]) -> Tuple[Dict[str, Any], float, float, bool, float, int]:
+    """Analyze loudness and compute gain."""
+    loudness = analyze_loudness(wav_path)
+    if not loudness:
+        logger.error(f"  Loudness analysis failed")
+        raise ValueError("Loudness analysis failed")
+    logger.info(f"  Loudness: {loudness.get('input_i', 'N/A')} LUFS, True Peak: {loudness.get('input_tp', 'N/A')} dB")
+    
+    target_tp = float((config.get('loudness', {}) or {}).get('target_tp', -0.5))
+    max_retries = int((config.get('loudness', {}) or {}).get('max_retries', 2))
+    input_tp = float(loudness.get('input_tp', -10))
+    loudness_mode = config.get('loudness_mode') or (config.get('loudness', {}) or {}).get('mode', 'fast')
+    gain_db, risk = compute_loudness_gain(input_tp, fmt, config, loudness_mode)
+    if risk:
+        logger.info(f"  Loudness mode: {loudness_mode} (Risiko: Quell-TP {input_tp:.2f} dBTP über Schwelle)")
+    return loudness, target_tp, max_retries, input_tp, loudness_mode, gain_db, risk
+
+
+def _encode_with_verification(wav_path: str, temp_output: str, metadata: Dict[str, str], 
+                               gain_db: float, fmt: str, loudness_mode: str, 
+                               target_tp: float, max_retries: int) -> Tuple[bool, float]:
+    """Encode audio with loudness verification if needed."""
+    success = encode_audio(wav_path, temp_output, metadata, gain_db, fmt)
+    if not success:
+        return False, gain_db
+    
+    if success and loudness_mode == 'verify':
+        measured_tp = None
+        for _attempt in range(max_retries + 1):
+            measured_tp = measure_output_true_peak(temp_output)
+            if measured_tp is None or measured_tp <= target_tp:
+                break
+            adjust = target_tp - measured_tp
+            gain_db = gain_db + adjust
+            logger.info(f"  Verify: Ausgabe-TP {measured_tp:.2f} dBTP > Ziel {target_tp} dBTP, korrigiere Gain um {adjust:.2f} dB → {gain_db:.2f} dB")
+            success = encode_audio(wav_path, temp_output, metadata, gain_db, fmt)
+            if not success:
+                break
+        if success and measured_tp is not None and measured_tp > target_tp:
+            logger.warning(f"  ⚠ Ausgabe true peak rel. {measured_tp:.2f} dBTP konnte auch nach {max_retries} Korrektur(en) nicht unter {target_tp} dBTP gebracht werden")
+    return success, gain_db
+
+
+def _handle_cover_embedding(cover_source: Optional[str], temp_cover: str, embed_cover: bool, fmt: str,
+                            temp_output: str, output_name: str) -> bool:
+    """Download/locate cover and embed it. Returns True on success (with or without cover)."""
+    cover_path = None
+    
+    if embed_cover and cover_source:
+        if cover_source.startswith('http'):
+            from .audio_processing import download_cover
+            if download_cover(cover_source, temp_cover):
+                cover_path = temp_cover
+                logger.info(f"  Cover: Downloaded from online source")
+        elif Path(cover_source).exists():
+            cover_path = cover_source
+            logger.info(f"  Cover: Using local/extracted cover")
+    
+    if not cover_path:
+        logger.debug(f"  Cover: Not found")
+    
+    if cover_path and Path(cover_path).exists():
+        logger.info(f"  Embedding cover: {cover_path}")
+        try:
+            embed_success = audio_embed_cover(temp_output, cover_path, output_name, fmt)
+        except Exception as e:
+            logger.error(f"  Embed exception: {e}")
+            embed_success = False
+        
+        if embed_success:
+            for f in [temp_output, temp_cover, cover_path]:
+                if f and f != cover_path and Path(f).exists():
+                    os.remove(f)
+            if cover_path == temp_cover and Path(temp_cover).exists():
+                os.remove(temp_cover)
+        else:
+            logger.warning(f"  Cover embedding failed, using raw file")
+            os.rename(temp_output, output_name)
+            if cover_path == temp_cover and Path(temp_cover).exists():
+                os.remove(temp_cover)
+    else:
+        os.rename(temp_output, output_name)
+    return True
+
+
+def _verify_and_finalize(output_name: str, fmt: str, temp_dir: Optional[str],
+                          original_wav_path: str, metadata: Dict[str, str],
+                          loudness: Dict[str, Any], risk: bool, loudness_mode: str,
+                          target_tp: float, input_tp: float, config: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """Verify output and finalize."""
+    valid, result = verify_output(output_name, fmt)
+    info = result if isinstance(result, dict) else {}
+    if valid:
+        logger.info(f"  SUCCESS: {output_name} ({fmt.upper()}: {info.get(fmt)}, Cover: {info.get('cover')})")
+        if risk and loudness_mode != 'verify':
+            measured_tp = measure_output_true_peak(output_name)
+            if measured_tp is not None and measured_tp > target_tp:
+                logger.warning(
+                    f"  ⚠ Ausgabe true peak: {measured_tp:.2f} dBTP > Ziel {target_tp} dBTP "
+                    f"(Quell-TP {input_tp:.2f} dBTP) — Quelle liegt nahe/über 0 dBFS und überschwingt "
+                    f"im {fmt.upper()}-Codec; für garantierten Peak: --loudness verify"
+                )
+        if temp_dir and Path(temp_dir).exists():
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        return True, output_name
+    else:
+        logger.error(f"  FAIL: Verification failed - {result}")
+        save_result_json(original_wav_path, metadata, loudness, output_name, False, bool(info.get('cover')), fmt)
+        return False, None
+
+
+
 def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True, config: Optional[Dict[str, Any]] = None) -> Tuple[bool, Optional[str]]:
     """Convert a single WAV file to MP3 or M4A."""
     original_wav_path = wav_path
@@ -134,6 +258,7 @@ def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True, conf
         config = load_config()
     
     try:
+        # ASCII filename conversion
         path_obj = Path(wav_path)
         ascii_stem = to_ascii_filename(path_obj.stem)
         
@@ -147,58 +272,21 @@ def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True, conf
             else:
                 logger.info(f"  Using filename: {ascii_filename_path.name} (already ASCII)")
         
-        base_name = Path(wav_path).stem
-        # Write next to the source file rather than into the current working
-        # directory, so `audioconvert /music/track.wav` does not drop the
-        # result into wherever the shell happened to be. The intermediates go
-        # there too: os.rename() fails across filesystem boundaries.
-        out_dir = Path(original_wav_path).parent
-        output_name = str(out_dir / (base_name + f'.{fmt}'))
+        # Prepare paths
+        base_name, temp_cover, temp_output, output_name = _prepare_output_paths(wav_path, original_wav_path, fmt)
         
-        file_hash = hash(wav_path) % 1000000
-        temp_cover = str(out_dir / f'cover_{file_hash}.jpg')
-        temp_output = str(out_dir / f'output_{file_hash}.{fmt}')
+        # Analyze loudness and compute gain
+        loudness, target_tp, max_retries, input_tp, loudness_mode, gain_db, risk = _analyze_loudness_and_gain(wav_path, fmt, config)
         
-        loudness = analyze_loudness(wav_path)
-        if not loudness:
-            logger.error(f"  Loudness analysis failed")
-            return False, None
-        logger.info(f"  Loudness: {loudness.get('input_i', 'N/A')} LUFS, True Peak: {loudness.get('input_tp', 'N/A')} dB")
-        
-        target_tp = float((config.get('loudness', {}) or {}).get('target_tp', -0.5))
-        max_retries = int((config.get('loudness', {}) or {}).get('max_retries', 2))
-
-        input_tp = float(loudness.get('input_tp', -10))
-        loudness_mode = config.get('loudness_mode') or (config.get('loudness', {}) or {}).get('mode', 'fast')
-        gain_db, risk = compute_loudness_gain(input_tp, fmt, config, loudness_mode)
-        if risk:
-            logger.info(f"  Loudness mode: {loudness_mode} (Risiko: Quell-TP {input_tp:.2f} dBTP über Schwelle)")
-        
+        # Get metadata and cover
         metadata, cover_source = enrich_and_search_cover(wav_path, base_name, config, original_wav_path)
-        
         search_artist = metadata.get('artist', '')
         search_title = metadata.get('title', '')
-        
         logger.info(f"  Metadata: {search_artist} – {search_title}")
-        
         metadata = {k: v for k, v in metadata.items() if isinstance(v, str)}
         
-        success = encode_audio(wav_path, temp_output, metadata, gain_db, fmt)
-        
-        if success and loudness_mode == 'verify':
-            measured_tp = None
-            for _attempt in range(max_retries + 1):
-                measured_tp = measure_output_true_peak(temp_output)
-                if measured_tp is None or measured_tp <= target_tp:
-                    break
-                adjust = target_tp - measured_tp
-                gain_db = gain_db + adjust
-                logger.info(f"  Verify: Ausgabe-TP {measured_tp:.2f} dBTP > Ziel {target_tp} dBTP, korrigiere Gain um {adjust:.2f} dB → {gain_db:.2f} dB")
-                success = encode_audio(wav_path, temp_output, metadata, gain_db, fmt)
-                if not success:
-                    break
-            if success and measured_tp is not None and measured_tp > target_tp:
-                logger.warning(f"  ⚠ Ausgabe true peak rel. {measured_tp:.2f} dBTP konnte auch nach {max_retries} Korrektur(en) nicht unter {target_tp} dBTP gebracht werden")
+        # Encode with optional loudness verification
+        success, gain_db = _encode_with_verification(wav_path, temp_output, metadata, gain_db, fmt, loudness_mode, target_tp, max_retries)
         
         if not success:
             logger.error(f"  Encoding failed")
@@ -208,71 +296,17 @@ def convert_file(wav_path: str, fmt: str = 'mp3', embed_cover: bool = True, conf
                     os.remove(f)
             return False, None
         
-        cover_path = None
+        # Handle cover embedding
+        _handle_cover_embedding(cover_source, temp_cover, embed_cover, fmt, temp_output, output_name)
         
-        if embed_cover and cover_source:
-            if cover_source.startswith('http'):
-                from .audio_processing import download_cover
-                if download_cover(cover_source, temp_cover):
-                    cover_path = temp_cover
-                    logger.info(f"  Cover: Downloaded from online source")
-            elif Path(cover_source).exists():
-                cover_path = cover_source
-                logger.info(f"  Cover: Using local/extracted cover")
-        
-        if not cover_path:
-            logger.debug(f"  Cover: Not found")
-        
-        if cover_path and Path(cover_path).exists():
-            logger.info(f"  Embedding cover: {cover_path}")
-            try:
-                embed_success = audio_embed_cover(temp_output, cover_path, output_name, fmt)
-            except Exception as e:
-                logger.error(f"  Embed exception: {e}")
-                embed_success = False
-            
-            if embed_success:
-                for f in [temp_output, temp_cover, cover_path]:
-                    if f and f != cover_path and Path(f).exists():
-                        os.remove(f)
-                if cover_path == temp_cover and Path(temp_cover).exists():
-                    os.remove(temp_cover)
-            else:
-                logger.warning(f"  Cover embedding failed, using raw file")
-                os.rename(temp_output, output_name)
-                if cover_path == temp_cover and Path(temp_cover).exists():
-                    os.remove(temp_cover)
-        else:
-            os.rename(temp_output, output_name)
-        
-        valid, result = verify_output(output_name, fmt)
-        info = result if isinstance(result, dict) else {}
-        if valid:
-            logger.info(f"  SUCCESS: {output_name} ({fmt.upper()}: {info.get(fmt)}, Cover: {info.get('cover')})")
-            if risk and loudness_mode != 'verify':
-                measured_tp = measure_output_true_peak(output_name)
-                if measured_tp is not None and measured_tp > target_tp:
-                    logger.warning(
-                        f"  ⚠ Ausgabe true peak: {measured_tp:.2f} dBTP > Ziel {target_tp} dBTP "
-                        f"(Quell-TP {input_tp:.2f} dBTP) — Quelle liegt nahe/über 0 dBFS und überschwingt "
-                        f"im {fmt.upper()}-Codec; für garantierten Peak: --loudness verify"
-                    )
-            if temp_dir and Path(temp_dir).exists():
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            return True, output_name
-        else:
-            logger.error(f"  FAIL: Verification failed - {result}")
-            save_result_json(original_wav_path, metadata, loudness, output_name, False, bool(info.get('cover')), fmt)
-            if temp_dir and Path(temp_dir).exists():
-                shutil.rmtree(temp_dir, ignore_errors=True)
-            return False, None
+        # Verify and finalize
+        return _verify_and_finalize(output_name, fmt, temp_dir, original_wav_path, metadata, loudness, risk, loudness_mode, target_tp, input_tp, config)
             
     except Exception as e:
         logger.error(f"  Conversion error: {e}")
         if temp_dir and Path(temp_dir).exists():
             shutil.rmtree(temp_dir, ignore_errors=True)
         return False, None
-
 
 def _convert_file_wrapper(args):
     """Wrapper for parallel processing."""

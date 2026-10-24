@@ -242,40 +242,6 @@ def search_soundcloud_cover(artist: str, title: str) -> Optional[str]:
     return None
 
 
-def search_all_sources(artist: str, title: str, filename: str = "") -> tuple[dict, Optional[str]]:
-    """Search all cover art sources in order.
-    
-    Returns:
-        tuple: (metadata dict, cover_url or None)
-    """
-    from .metadata import extract_metadata_from_filename
-    
-    result_metadata: Dict[str, Any] = {}
-    cover_url: Optional[str] = None
-    
-    # Try to get metadata from filename first
-    if not artist or not title:
-        artist, title = extract_metadata_from_filename(filename or "")
-        result_metadata = {"artist": artist, "title": title}
-    
-    sources = [
-        ("Deezer", lambda a, t: search_deezer_cover(a, t)),
-        ("MusicBrainz", lambda a, t: search_musicbrainz_cover(a, t)),
-        ("Bandcamp", lambda a, t: search_bandcamp_cover(a, t)),
-    ]
-    
-    for source_name, search_func in sources:
-        try:
-            found_cover: Optional[str] = search_func(artist, title)
-            if found_cover and not cover_url:
-                cover_url = found_cover
-                logger.info(f"  {source_name} cover found")
-        except Exception as e:
-            logger.warning(f"  {source_name} search failed: {e}")
-    
-    return result_metadata, cover_url
-
-
 def enrich_and_search_cover(wav_path: str, filename: str, config: Dict[str, Any], original_wav_path: Optional[str] = None) -> Tuple[Dict[str, Any], Optional[str]]:
     """Combined function: Online metadata lookup + enrich + cover search.
     
